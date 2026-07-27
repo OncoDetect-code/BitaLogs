@@ -391,8 +391,8 @@ with _logo_col:
         st.image(str(_ICONO), width=64)
 with _tit_col:
     st.title("BitaLogs")
-    st.caption("Dashboard de Rendimiento · Práctica Profesional · "
-               "Ingeniería Biomédica UNITEC")
+    st.caption("Dashboard de Rendimiento · Práctica Profesional Luis Velásquez 21941285 · "
+               "Ingeniería Biomédica UNITEC Q3 2026")
 
 # Botón para volver a ver la animación de carga cuando se quiera
 with st.sidebar:
