@@ -283,6 +283,48 @@ _ICONO = Path(__file__).parent / "bitalogs_icon.png"
 st.set_page_config(page_title="BitaLogs · Práctica Profesional",
                    page_icon=str(_ICONO) if _ICONO.exists() else "📘",
                    layout="wide")
+
+# CSS responsive: en desktop mantiene el ancho amplio; en celular ajusta
+# el padding para que el contenido no quede pegado a la izquierda y use
+# bien el ancho de la pantalla.
+st.markdown("""
+<style>
+    /* Contenedor principal: padding cómodo y centrado */
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 3rem;
+        padding-left: 3rem;
+        padding-right: 3rem;
+        max-width: 1400px;
+        margin: 0 auto;
+    }
+    /* En celular (pantallas < 640px): menos padding lateral para
+       aprovechar el ancho, y contenido centrado */
+    @media (max-width: 640px) {
+        .block-container {
+            padding-left: 1rem;
+            padding-right: 1rem;
+            padding-top: 1rem;
+        }
+        /* Que las columnas apiladas queden bien separadas */
+        [data-testid="stHorizontalBlock"] {
+            gap: 0.5rem;
+        }
+        /* Métricas (KPIs) más compactas y legibles en vertical */
+        [data-testid="stMetricValue"] {
+            font-size: 1.4rem;
+        }
+        /* Título un poco más chico para que no desborde */
+        h1 { font-size: 1.6rem; }
+        /* Tabs que no se corten: permitir scroll horizontal */
+        [data-testid="stTabs"] [data-baseweb="tab-list"] {
+            overflow-x: auto;
+            flex-wrap: nowrap;
+        }
+    }
+</style>
+""", unsafe_allow_html=True)
+
 mostrar_splash(st)   # pantalla de carga (~3.5 s) al abrir o recargar
 init_db()
 
