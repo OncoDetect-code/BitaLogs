@@ -1,0 +1,54 @@
+==========================================================
+  BitaLogs - Dashboard de Rendimiento de Practica
+  Ingenieria Biomedica UNITEC
+==========================================================
+
+QUE ES
+  App para registrar y visualizar tu rendimiento durante la
+  practica profesional (20 jul - 25 sep 2026, 10 semanas, 400 h).
+
+COMO ABRIRLO (Windows)
+  1. Asegurate de tener Python instalado (python.org, marca
+     "Add Python to PATH" al instalar).
+  2. Doble clic en BitaLogs.bat
+     La primera vez instala solo las dependencias.
+  3. Se abre en el navegador (http://localhost:8501).
+     Al abrir veras la animacion de carga (barras que crecen).
+  Para cerrarlo: cierra la ventana negra (consola).
+
+PONER EL ICONO AL ACCESO DIRECTO DEL ESCRITORIO
+  1. Clic derecho en BitaLogs.bat > Enviar a > Escritorio
+     (crear acceso directo).
+  2. Clic derecho en el acceso directo > Propiedades >
+     Cambiar icono > Examinar > selecciona BitaLogs.ico.
+
+SECCIONES
+  - Dashboard : KPIs (equipos vistos, unicos, promedio de
+    atencion en minutos, equipos por dia), horas acumuladas
+    con progreso, y graficas por area / tipo / resolucion /
+    duracion / semana. Filtra por toda la practica, por semana
+    o por dia en la barra lateral.
+  - Nueva atencion : formulario de captura con hora de inicio
+    y fin (calcula la duracion sola).
+  - Cargar bitacora : sube tu Excel "Matriz de impacto" y
+    extrae equipo, problema, solucion, resuelto, impacto y
+    observaciones. Completas fecha, area, tipo y horas y guardas.
+  - Datos : tabla editable de todo; semana, dia y duracion se
+    recalculan solos al guardar. Permite borrar filas.
+  - Comentarios : tus evaluadores dejan comentario por semana,
+    firmado con su nombre y fecha.
+
+ARCHIVOS
+  bitalogs.py            App principal
+  splash.py             Pantalla de carga animada
+  calendario.py          Logica de las 10 semanas y horas
+  importar_bitacora.py   Lector del Excel institucional
+  bitalogs_icon.png      Icono de la app (pestana del navegador)
+  BitaLogs.ico           Icono para el acceso directo de Windows
+  bitalogs.db            Base de datos (se crea sola; aqui viven
+                         tus registros; respaldala de vez en cuando)
+
+NOTA SOBRE HORAS
+  Se asume 8 h/dia de lunes a viernes. Los feriados NO se
+  descuentan por ahora. Si quieres descontarlos luego, se ajusta
+  en calendario.py (FERIADOS y DESCONTAR_FERIADOS).
