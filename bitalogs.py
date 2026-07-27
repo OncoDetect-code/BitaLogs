@@ -23,7 +23,7 @@ En Streamlit Cloud, ese mismo valor se pega en Settings -> Secrets.
 Las tablas se crean solas la primera vez (init_db).
 """
 
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timezone, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -34,6 +34,15 @@ from sqlalchemy import create_engine, text
 import calendario as cal
 from importar_bitacora import leer_matriz
 from splash import mostrar_splash
+
+# Honduras usa UTC-6 todo el año (sin horario de verano). En Streamlit
+# Cloud el servidor corre en UTC, así que date.today() daría el día
+# equivocado; hoy_hn() devuelve la fecha real de Honduras.
+_TZ_HN = timezone(timedelta(hours=-6))
+
+
+def hoy_hn() -> date:
+    return datetime.now(_TZ_HN).date()
 
 # ------------------------------------------------------------- Catálogos
 AREAS = ["Hospitalización A", "Hospitalización B", "UCI A", "UCI B",
@@ -312,7 +321,7 @@ with tab_input:
     with st.form("nueva", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
         with c1:
-            f_fecha = st.date_input("Fecha", value=date.today())
+            f_fecha = st.date_input("Fecha", value=hoy_hn())
             f_area = st.selectbox("Área", AREAS)
             f_tipo = st.selectbox("Tipo de mantenimiento", TIPOS)
         with c2:
@@ -426,7 +435,7 @@ with tab_carga:
                     except ValueError:
                         sem = r.get("semana"); dia = r.get("dia")
                     nuevos.append({
-                        "fecha": fecha or date.today().isoformat(),
+                        "fecha": fecha or hoy_hn().isoformat(),
                         "semana": sem, "dia": dia,
                         "hora_inicio": str(r.get("hora_inicio", "") or ""),
                         "hora_fin": str(r.get("hora_fin", "") or ""),
@@ -506,7 +515,7 @@ with tab_dash:
         # ---- Horas acumuladas ----
         st.divider()
         st.subheader("⏱️ Horas de práctica")
-        hoy = date.today()
+        hoy = hoy_hn()
         ref = hoy
         if modo == "Semana" and sem_sel:
             ref = cal.viernes_de_semana(sem_sel)
@@ -542,11 +551,15 @@ with tab_dash:
                         .reindex(AREAS, fill_value=0)
                         .rename_axis("Área").reset_index(name="Equipos"))
             por_area = por_area[por_area["Equipos"] > 0]
-            fig = px.bar(por_area, x="Área", y="Equipos",
-                         title="Equipos por área")
-            fig.update_traces(marker_color="#1F4E78")
-            fig.update_layout(xaxis_tickangle=-40)
-            st.plotly_chart(fig, use_container_width=True)
+            if por_area.empty:
+                st.caption("📊 Equipos por área")
+                st.info("Aún no hay atenciones con área asignada para mostrar.")
+            else:
+                fig = px.bar(por_area, x="Área", y="Equipos",
+                             title="Equipos por área")
+                fig.update_traces(marker_color="#1F4E78")
+                fig.update_layout(xaxis_tickangle=-40)
+                st.plotly_chart(fig, use_container_width=True)
         with g2:
             por_tipo = (fdf.groupby("tipo").size()
                         .rename_axis("Tipo").reset_index(name="Cantidad"))
