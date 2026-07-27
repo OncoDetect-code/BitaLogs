@@ -284,39 +284,45 @@ st.set_page_config(page_title="BitaLogs · Práctica Profesional",
                    page_icon=str(_ICONO) if _ICONO.exists() else "📘",
                    layout="wide")
 
-# CSS responsive: en desktop mantiene el ancho amplio; en celular ajusta
-# el padding para que el contenido no quede pegado a la izquierda y use
-# bien el ancho de la pantalla.
+# CSS responsive: en desktop mantiene el ancho amplio; en celular fuerza
+# que el contenido ocupe todo el ancho y quede centrado (sin el hueco a
+# la derecha). Se usan selectores fuertes + !important porque Streamlit
+# aplica sus propios anchos que de otro modo ganan.
 st.markdown("""
 <style>
-    /* Contenedor principal: padding cómodo y centrado */
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 3rem;
-        padding-left: 3rem;
-        padding-right: 3rem;
-        max-width: 1400px;
-        margin: 0 auto;
+    /* Desktop: contenido centrado con ancho máximo cómodo */
+    .stMainBlockContainer, .block-container,
+    section.main > div.block-container {
+        max-width: 1400px !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+        padding-left: 3rem !important;
+        padding-right: 3rem !important;
     }
-    /* En celular (pantallas < 640px): menos padding lateral para
-       aprovechar el ancho, y contenido centrado */
-    @media (max-width: 640px) {
-        .block-container {
-            padding-left: 1rem;
-            padding-right: 1rem;
-            padding-top: 1rem;
+
+    /* Celular: ocupar TODO el ancho, sin hueco a la derecha */
+    @media (max-width: 768px) {
+        .stMainBlockContainer, .block-container,
+        section.main > div.block-container {
+            max-width: 100% !important;
+            width: 100% !important;
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+            padding-top: 1rem !important;
+            margin-left: 0 !important;
+            margin-right: 0 !important;
         }
-        /* Que las columnas apiladas queden bien separadas */
-        [data-testid="stHorizontalBlock"] {
-            gap: 0.5rem;
+        /* El área principal completa al 100% */
+        section.main, .stMain, [data-testid="stMain"] {
+            width: 100% !important;
         }
-        /* Métricas (KPIs) más compactas y legibles en vertical */
-        [data-testid="stMetricValue"] {
-            font-size: 1.4rem;
+        [data-testid="stAppViewContainer"] {
+            width: 100% !important;
         }
-        /* Título un poco más chico para que no desborde */
-        h1 { font-size: 1.6rem; }
-        /* Tabs que no se corten: permitir scroll horizontal */
+        /* KPIs y título legibles en vertical */
+        [data-testid="stMetricValue"] { font-size: 1.4rem !important; }
+        h1 { font-size: 1.6rem !important; }
+        /* Tabs con scroll horizontal si no caben */
         [data-testid="stTabs"] [data-baseweb="tab-list"] {
             overflow-x: auto;
             flex-wrap: nowrap;
@@ -324,6 +330,57 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
+# --- Ícono para "Agregar a pantalla de inicio" (Android/iPhone) ---
+# Lee bitalogs_icon.png, lo incrusta como base64 y declara las etiquetas
+# que Chrome/Safari usan para el ícono del acceso directo, más un manifest
+# mínimo para que Android lo trate como app (nombre + logo BitaLogs).
+def _inyectar_icono_movil():
+    import base64
+    import json
+    import streamlit.components.v1 as _components
+    if not _ICONO.exists():
+        return
+    b64 = base64.b64encode(_ICONO.read_bytes()).decode("ascii")
+    data_uri = f"data:image/png;base64,{b64}"
+    manifest = {
+        "name": "BitaLogs",
+        "short_name": "BitaLogs",
+        "icons": [{"src": data_uri, "sizes": "192x192", "type": "image/png"},
+                  {"src": data_uri, "sizes": "512x512", "type": "image/png"}],
+        "display": "standalone",
+        "background_color": "#FFFFFF",
+        "theme_color": "#1F4E78",
+    }
+    manifest_uri = ("data:application/manifest+json;base64," +
+                    base64.b64encode(json.dumps(manifest).encode()).decode())
+    # Se inyecta en el <head> del documento padre (la app real, no el iframe).
+    _components.html(f"""
+    <script>
+    (function() {{
+      var doc = window.parent.document;
+      function add(tag, attrs) {{
+        var el = doc.createElement(tag);
+        for (var k in attrs) el.setAttribute(k, attrs[k]);
+        doc.head.appendChild(el);
+      }}
+      if (!doc.getElementById('bl-touch-icon')) {{
+        var l1 = doc.createElement('link');
+        l1.id = 'bl-touch-icon';
+        l1.rel = 'apple-touch-icon';
+        l1.href = '{data_uri}';
+        doc.head.appendChild(l1);
+        add('link', {{rel: 'icon', type: 'image/png', href: '{data_uri}'}});
+        add('link', {{rel: 'manifest', href: '{manifest_uri}'}});
+        add('meta', {{name: 'apple-mobile-web-app-title', content: 'BitaLogs'}});
+        add('meta', {{name: 'apple-mobile-web-app-capable', content: 'yes'}});
+      }}
+    }})();
+    </script>
+    """, height=0, width=0)
+
+
+_inyectar_icono_movil()
 
 mostrar_splash(st)   # pantalla de carga (~3.5 s) al abrir o recargar
 init_db()
