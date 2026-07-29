@@ -189,6 +189,30 @@ def load_atenciones() -> pd.DataFrame:
             text("SELECT * FROM atenciones ORDER BY fecha DESC, id DESC"), conn)
 
 
+def _orden_secuencial(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Agrega una columna 'n' con la numeración amigable: 1, 2, 3... en
+    orden cronológico de la práctica (Semana → Día → hora de inicio →
+    id como desempate), sin importar el id crudo de la base. El id real
+    se conserva intacto para las operaciones internas.
+    """
+    if df.empty:
+        df = df.copy()
+        df["n"] = []
+        return df
+    df = df.copy()
+    df["_sem_o"] = pd.to_numeric(df.get("semana"), errors="coerce")
+    df["_dia_o"] = pd.to_numeric(df.get("dia"), errors="coerce")
+    df["_hi_o"] = df.get("hora_inicio", "").astype(str)
+    orden = (df.sort_values(
+                ["_sem_o", "_dia_o", "_hi_o", "id"], na_position="last")
+             .reset_index())
+    orden["n"] = range(1, len(orden) + 1)
+    mapa = dict(zip(orden["id"], orden["n"]))
+    df["n"] = df["id"].map(mapa)
+    return df.drop(columns=["_sem_o", "_dia_o", "_hi_o"])
+
+
 def update_atenciones_from_df(df_edit: pd.DataFrame):
     """
     Aplica los cambios del editor SIN borrar toda la tabla, para preservar
@@ -283,6 +307,24 @@ def update_imagenes(id_: int, imgs: list):
             WHERE id = :id
         """), {"id": id_, "img1": imgs[0], "img2": imgs[1],
                "img3": imgs[2], "img4": imgs[3]})
+
+
+def reordenar_imagenes(id_: int, nuevo_orden: list):
+    """
+    Reordena las imágenes de un registro según 'nuevo_orden', una lista
+    de data-URIs ya en el orden deseado (los que van primero se muestran
+    primero). Rellena con None hasta 4 slots. No comprime ni recodifica:
+    solo reasigna qué foto ocupa img1..img4.
+    """
+    orden = [x for x in nuevo_orden if x and str(x).strip()][:4]
+    orden = orden + [None] * (4 - len(orden))
+    with get_engine().begin() as conn:
+        conn.execute(text("""
+            UPDATE atenciones
+            SET img1 = :img1, img2 = :img2, img3 = :img3, img4 = :img4
+            WHERE id = :id
+        """), {"id": id_, "img1": orden[0], "img2": orden[1],
+               "img3": orden[2], "img4": orden[3]})
 
 
 def imagenes_de(id_: int) -> list:
@@ -873,15 +915,24 @@ with tab_datos:
     if df.empty:
         st.info("Sin datos todavía.")
     else:
+        # Numeración amigable (1,2,3... por Semana→Día), independiente del id.
+        df = _orden_secuencial(df)
         # Ocultar las columnas de imagen en el editor (son base64 enormes);
         # se conservan al guardar porque update las preserva desde la BD.
         cols_ocultar = ["img1", "img2", "img3", "img4"]
         show = df.drop(columns=[c for c in cols_ocultar if c in df.columns])
-        show = show.rename(columns=COLS)
+        # Mostrar 'n' (N°) al frente y ordenar la tabla por esa numeración.
+        show = show.sort_values("n")
+        cols_front = ["n"] + [c for c in show.columns if c != "n"]
+        show = show[cols_front]
+        show = show.rename(columns={**COLS, "n": "N°"})
         edited = st.data_editor(
             show, use_container_width=True, hide_index=True, num_rows="dynamic",
             key="editor_datos",
             column_config={
+                "N°": st.column_config.NumberColumn(
+                    "N°", disabled=True,
+                    help="Número secuencial de la práctica (no el id interno)."),
                 "Área": st.column_config.SelectboxColumn("Área", options=AREAS),
                 "Tipo de mantenimiento": st.column_config.SelectboxColumn(
                     "Tipo de mantenimiento", options=TIPOS),
@@ -899,7 +950,9 @@ with tab_datos:
         )
         if st.button("💾 Guardar cambios", type="primary", key="save_datos"):
             inv = {v: k for k, v in COLS.items()}
-            update_atenciones_from_df(edited.rename(columns=inv))
+            # Quitar la columna de numeración amigable (no existe en la BD).
+            edited_save = edited.drop(columns=["N°"], errors="ignore")
+            update_atenciones_from_df(edited_save.rename(columns=inv))
             st.success("Cambios guardados.")
             st.rerun()
 
@@ -907,20 +960,52 @@ with tab_datos:
         st.subheader("📷 Agregar o cambiar fotos de un registro")
         st.caption("Selecciona un registro (incluidos los antiguos) y súbele "
                    "hasta 4 fotos. Reemplaza las que tenga.")
-        etqs_img = [f"#{r['id']}  |  {r['fecha']}  |  S{r['semana']}D{r['dia']}"
+        df_ord = df.sort_values("n")
+        etqs_img = [f"N° {int(r['n'])}  |  {r['fecha']}  |  S{r['semana']}D{r['dia']}"
                     f"  |  {r['area']}  |  {r['equipo']}"
-                    for _, r in df.iterrows()]
+                    for _, r in df_ord.iterrows()]
+        # Mapa etiqueta -> id real de la base
+        _map_img = {e: int(r["id"]) for e, (_, r) in zip(etqs_img, df_ord.iterrows())}
         sel_img = st.selectbox("Registro", ["— Selecciona —"] + etqs_img,
                                key="sel_reg_img")
         if sel_img != "— Selecciona —":
-            id_img = int(sel_img.split("  |  ")[0].replace("#", "").strip())
+            id_img = _map_img[sel_img]
             actuales = imagenes_de(id_img)
             if actuales:
-                st.write(f"Este registro ya tiene **{len(actuales)}** foto(s):")
+                st.write(f"Este registro ya tiene **{len(actuales)}** foto(s). "
+                         "El orden de abajo es el que aparece en la bitácora "
+                         "(1 = primera).")
                 cols_prev = st.columns(4)
                 for i, src in enumerate(actuales):
                     with cols_prev[i]:
                         st.image(src, use_container_width=True)
+                        st.caption(f"Posición actual: {i + 1}")
+
+                # ---- Reordenar (#2): asignar nueva posición a cada foto ----
+                if len(actuales) > 1:
+                    st.markdown("**↕️ Reordenar fotos**")
+                    st.caption("Elige la nueva posición de cada foto y guarda. "
+                               "Si repites un número, se resuelve por orden.")
+                    cols_ord = st.columns(len(actuales))
+                    nuevas_pos = []
+                    for i, _src in enumerate(actuales):
+                        with cols_ord[i]:
+                            pos = st.selectbox(
+                                f"Foto {i + 1} →",
+                                list(range(1, len(actuales) + 1)),
+                                index=i, key=f"pos_{id_img}_{i}")
+                            nuevas_pos.append(pos)
+                    if st.button("💾 Guardar nuevo orden",
+                                 key=f"save_orden_{id_img}"):
+                        # Ordenar las fotos por la posición pedida; empates
+                        # se rompen por el orden original (estable).
+                        pares = sorted(
+                            zip(nuevas_pos, range(len(actuales)), actuales),
+                            key=lambda t: (t[0], t[1]))
+                        nuevo = [src for _, _, src in pares]
+                        reordenar_imagenes(id_img, nuevo)
+                        st.success("✅ Orden de fotos actualizado.")
+                        st.rerun()
             else:
                 st.write("Este registro **no tiene fotos** todavía.")
 
@@ -955,17 +1040,20 @@ with tab_datos:
 
         st.divider()
         st.subheader("🗑️ Eliminar una atención")
-        etqs = [f"#{r['id']}  |  {r['fecha']}  |  {r['area']}  |  {r['equipo']}"
-                for _, r in df.iterrows()]
+        df_del = df.sort_values("n")
+        etqs = [f"N° {int(r['n'])}  |  {r['fecha']}  |  {r['area']}  |  {r['equipo']}"
+                for _, r in df_del.iterrows()]
+        _map_del = {e: (int(r["id"]), int(r["n"]))
+                    for e, (_, r) in zip(etqs, df_del.iterrows())}
         sel = st.selectbox("Atención a eliminar", ["— Selecciona —"] + etqs,
                            key="del_at")
         if sel != "— Selecciona —":
-            id_del = int(sel.split("  |  ")[0].replace("#", "").strip())
-            if st.checkbox(f"Confirmo eliminar la atención #{id_del}",
+            id_del, n_del = _map_del[sel]
+            if st.checkbox(f"Confirmo eliminar la atención N° {n_del}",
                            key="cf_del"):
                 if st.button("Eliminar definitivamente", key="btn_del_at"):
                     delete_atencion(id_del)
-                    st.success(f"Atención #{id_del} eliminada.")
+                    st.success(f"Atención N° {n_del} eliminada.")
                     st.rerun()
 
 

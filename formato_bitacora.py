@@ -24,18 +24,44 @@ _AZUL = "#1F4E78"
 _GRIS_ENC = "#D9E1F2"
 
 
+# Valores que, venidos de un DataFrame, significan "vacío" pero llegan
+# como texto ("None", "nan") o como float NaN. Sin filtrarlos, un slot
+# de imagen vacío producía <img src="nan"> = el ícono roto.
+_VACIOS = {"", "none", "nan", "null", "<na>"}
+
+
+def _es_vacio(v):
+    if v is None:
+        return True
+    try:
+        # float('nan') != float('nan'): así detectamos NaN de pandas
+        if isinstance(v, float) and v != v:
+            return True
+    except Exception:
+        pass
+    return str(v).strip().lower() in _VACIOS
+
+
 def _v(rep, key, default=""):
     val = rep.get(key, default)
-    return "" if val is None else str(val)
+    return "" if _es_vacio(val) else str(val)
 
 
 def _imgs_de(rep):
-    """Lista de data-URIs presentes (1 a 4) en el registro."""
+    """
+    Lista de data-URIs REALES presentes (1 a 4) en el registro, en el
+    orden img1→img4. Se ignoran los slots vacíos (None, NaN, "None",
+    "nan", cadenas en blanco) y también cualquier valor que no sea un
+    data-URI de imagen, para no renderizar nunca un <img> roto.
+    """
     out = []
     for k in ("img1", "img2", "img3", "img4"):
         v = rep.get(k)
-        if v and str(v).strip():
-            out.append(str(v))
+        if _es_vacio(v):
+            continue
+        s = str(v).strip()
+        if s.startswith("data:image"):
+            out.append(s)
     return out
 
 
