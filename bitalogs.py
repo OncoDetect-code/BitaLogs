@@ -33,6 +33,7 @@ from sqlalchemy import create_engine, text
 
 import calendario as cal
 from importar_bitacora import leer_matriz
+from formato_bitacora import bitacora_html
 from splash import mostrar_splash
 
 # Honduras usa UTC-6 todo el año (sin horario de verano). En Streamlit
@@ -74,10 +75,12 @@ def get_engine():
     """
     Motor SQLAlchemy hacia PostgreSQL (Supabase). La URL vive en
     st.secrets["DB_URL"]. pool_pre_ping evita conexiones muertas del
-    pooler; se cachea para no reabrir el pool en cada rerun.
+    pooler; prepare_threshold=None desactiva los prepared statements
+    que chocan con el pooler de Supabase (puerto 6543).
     """
     url = st.secrets["DB_URL"]
-    return create_engine(url, pool_pre_ping=True)
+    return create_engine(url, pool_pre_ping=True,
+                         connect_args={"prepare_threshold": None})
 
 
 def init_db():
@@ -102,6 +105,11 @@ def init_db():
                 fecha_registro TEXT NOT NULL
             )
         """))
+        # Columnas para hasta 4 imágenes (base64). ADD COLUMN IF NOT EXISTS
+        # es seguro: no toca datos existentes ni falla si ya están.
+        for i in (1, 2, 3, 4):
+            conn.execute(text(
+                f"ALTER TABLE atenciones ADD COLUMN IF NOT EXISTS img{i} TEXT"))
 
 
 def _dur_min(hi: str, hf: str):
@@ -115,6 +123,35 @@ def _dur_min(hi: str, hf: str):
         return None
 
 
+def _img_a_base64(archivo, max_lado: int = 1000, calidad: int = 72):
+    """
+    Convierte una imagen subida (JPEG/PNG) a un data-URI base64 comprimido,
+    listo para guardar en la base y mostrar en HTML. Redimensiona el lado
+    mayor a max_lado px para no inflar la base de datos. Devuelve None si
+    el archivo no es válido.
+    """
+    import base64
+    import io
+    try:
+        from PIL import Image
+        im = Image.open(archivo)
+        # Convertir a RGB (por si viene con transparencia o modo raro)
+        if im.mode not in ("RGB", "L"):
+            im = im.convert("RGB")
+        # Redimensionar manteniendo proporción
+        w, h = im.size
+        if max(w, h) > max_lado:
+            escala = max_lado / max(w, h)
+            im = im.resize((int(w * escala), int(h * escala)),
+                           Image.LANCZOS)
+        buf = io.BytesIO()
+        im.save(buf, format="JPEG", quality=calidad, optimize=True)
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        return f"data:image/jpeg;base64,{b64}"
+    except Exception:
+        return None
+
+
 def insert_atencion(d: dict):
     d = dict(d)
     d["duracion_min"] = _dur_min(d.get("hora_inicio"), d.get("hora_fin"))
@@ -123,11 +160,11 @@ def insert_atencion(d: dict):
             INSERT INTO atenciones
             (fecha, semana, dia, hora_inicio, hora_fin, duracion_min, area,
              equipo, marca, modelo, serie, tipo, problema, solucion, resuelto,
-             impacto, observaciones)
+             impacto, observaciones, img1, img2, img3, img4)
             VALUES (:fecha, :semana, :dia, :hora_inicio, :hora_fin,
                     :duracion_min, :area, :equipo, :marca, :modelo, :serie,
                     :tipo, :problema, :solucion, :resuelto, :impacto,
-                    :observaciones)
+                    :observaciones, :img1, :img2, :img3, :img4)
         """), {
             "fecha": d["fecha"], "semana": d["semana"], "dia": d["dia"],
             "hora_inicio": d["hora_inicio"], "hora_fin": d["hora_fin"],
@@ -136,6 +173,8 @@ def insert_atencion(d: dict):
             "serie": d["serie"], "tipo": d["tipo"], "problema": d["problema"],
             "solucion": d["solucion"], "resuelto": d["resuelto"],
             "impacto": d["impacto"], "observaciones": d["observaciones"],
+            "img1": d.get("img1"), "img2": d.get("img2"),
+            "img3": d.get("img3"), "img4": d.get("img4"),
         })
 
 
@@ -151,30 +190,43 @@ def load_atenciones() -> pd.DataFrame:
 
 
 def update_atenciones_from_df(df_edit: pd.DataFrame):
-    """Reescribe la tabla con el contenido editado, recalculando semana/día/duración."""
+    """
+    Reescribe la tabla con el contenido editado. Respeta la semana y el día
+    que el usuario haya puesto a mano (para poder corregir, p.ej., un registro
+    que se cargó tarde). Solo si semana/día vienen vacíos los deduce de la fecha.
+    """
     with get_engine().begin() as conn:
         conn.execute(text("DELETE FROM atenciones"))
         for _, r in df_edit.iterrows():
             fecha = str(r.get("fecha", "")).strip()
             if not fecha:
                 continue
-            try:
-                fd = datetime.strptime(fecha[:10], "%Y-%m-%d").date()
-                sem = cal.semana_de_fecha(fd)
-                dia = cal.dia_de_semana_num(fd)
-            except ValueError:
-                sem = r.get("semana"); dia = r.get("dia")
+            # Tomar semana/día tal como el usuario los dejó
+            sem = r.get("semana")
+            dia = r.get("dia")
+            sem = int(sem) if str(sem).strip() not in ("", "None", "nan") else None
+            dia = int(dia) if str(dia).strip() not in ("", "None", "nan") else None
+            # Si faltan, deducir de la fecha (comportamiento anterior)
+            if sem is None or dia is None:
+                try:
+                    fd = datetime.strptime(fecha[:10], "%Y-%m-%d").date()
+                    if sem is None:
+                        sem = cal.semana_de_fecha(fd)
+                    if dia is None:
+                        dia = cal.dia_de_semana_num(fd)
+                except ValueError:
+                    pass
             hi = str(r.get("hora_inicio", "") or "")
             hf = str(r.get("hora_fin", "") or "")
             conn.execute(text("""
                 INSERT INTO atenciones
                 (fecha, semana, dia, hora_inicio, hora_fin, duracion_min, area,
                  equipo, marca, modelo, serie, tipo, problema, solucion,
-                 resuelto, impacto, observaciones)
+                 resuelto, impacto, observaciones, img1, img2, img3, img4)
                 VALUES (:fecha, :semana, :dia, :hora_inicio, :hora_fin,
                         :duracion_min, :area, :equipo, :marca, :modelo, :serie,
                         :tipo, :problema, :solucion, :resuelto, :impacto,
-                        :observaciones)
+                        :observaciones, :img1, :img2, :img3, :img4)
             """), {
                 "fecha": fecha[:10], "semana": sem, "dia": dia,
                 "hora_inicio": hi, "hora_fin": hf, "duracion_min": _dur_min(hi, hf),
@@ -184,6 +236,8 @@ def update_atenciones_from_df(df_edit: pd.DataFrame):
                 "problema": r.get("problema"), "solucion": r.get("solucion"),
                 "resuelto": r.get("resuelto"), "impacto": r.get("impacto"),
                 "observaciones": r.get("observaciones"),
+                "img1": r.get("img1"), "img2": r.get("img2"),
+                "img3": r.get("img3"), "img4": r.get("img4"),
             })
 
 
@@ -399,9 +453,9 @@ with st.sidebar:
     if st.button("▶️ Ver animación de carga"):
         mostrar_splash(st, forzar=True)
 
-tab_dash, tab_input, tab_carga, tab_datos, tab_coment = st.tabs(
+tab_dash, tab_input, tab_carga, tab_datos, tab_bitacora, tab_coment = st.tabs(
     ["📊 Dashboard", "➕ Nueva atención", "📥 Cargar bitácora",
-     "🗂️ Datos", "💬 Comentarios"])
+     "🗂️ Datos", "📄 Mostrar Bitácoras", "💬 Comentarios"])
 
 
 # ---------------- helper: preparar df con tipos
@@ -432,6 +486,22 @@ with tab_input:
             f_ini = st.time_input("Hora de inicio", value=time(8, 0))
             f_fin = st.time_input("Hora de finalización", value=time(9, 0))
 
+        # Semana y Día EDITABLES. Se sugieren desde la fecha, pero podés
+        # corregirlos (p.ej. si cargás hoy un registro que era de ayer).
+        _sem_sug = cal.semana_de_fecha(f_fecha) or 1
+        _dia_sug = cal.dia_de_semana_num(f_fecha) or 1
+        s1, s2, _s3 = st.columns([1, 1, 2])
+        with s1:
+            f_semana = st.selectbox(
+                "Semana", cal.lista_semanas(),
+                index=cal.lista_semanas().index(_sem_sug),
+                help="Corrige la semana si el registro corresponde a otra.")
+        with s2:
+            f_dia = st.selectbox(
+                "Día", [1, 2, 3, 4, 5], index=_dia_sug - 1,
+                format_func=lambda d: f"Día {d}",
+                help="Corrige el día si lo cargas con retraso.")
+
         f_prob = st.text_area("Problema identificado", height=80)
         f_sol = st.text_area("Solución sugerida / trabajo realizado", height=80)
 
@@ -441,18 +511,37 @@ with tab_input:
         f_imp = st.text_area("Impacto esperado o beneficio real", height=70)
         f_obs = st.text_area("Observaciones", height=70)
 
+        # Hasta 4 imágenes JPEG que se mostrarán en "Mostrar Bitácoras"
+        f_imgs = st.file_uploader(
+            "Evidencia fotográfica (hasta 4 imágenes JPEG)",
+            type=["jpg", "jpeg", "png"], accept_multiple_files=True,
+            key="up_imgs",
+            help="Arrastra o selecciona hasta 4 fotos. Se comprimen automáticamente.")
+
         enviado = st.form_submit_button("Guardar atención", type="primary")
         if enviado:
             if not f_equipo.strip():
                 st.error("El campo 'Equipo' es obligatorio.")
             else:
-                sem = cal.semana_de_fecha(f_fecha)
-                dia = cal.dia_de_semana_num(f_fecha)
-                if sem is None:
+                # Procesar imágenes (máx 4)
+                imgs_b64 = []
+                if f_imgs:
+                    for archivo in f_imgs[:4]:
+                        b64 = _img_a_base64(archivo)
+                        if b64:
+                            imgs_b64.append(b64)
+                    if len(f_imgs) > 4:
+                        st.warning("Solo se guardaron las primeras 4 imágenes.")
+                while len(imgs_b64) < 4:
+                    imgs_b64.append(None)
+
+                if cal.semana_de_fecha(f_fecha) is None:
                     st.warning("⚠️ La fecha está fuera del período de práctica "
-                               f"(20 jul – 25 sep 2026). Se guardará sin semana.")
+                               "(20 jul – 25 sep 2026), pero se guardará con la "
+                               f"Semana {f_semana} y Día {f_dia} que elegiste.")
                 insert_atencion({
-                    "fecha": f_fecha.isoformat(), "semana": sem, "dia": dia,
+                    "fecha": f_fecha.isoformat(),
+                    "semana": int(f_semana), "dia": int(f_dia),
                     "hora_inicio": f_ini.strftime("%H:%M"),
                     "hora_fin": f_fin.strftime("%H:%M"),
                     "area": f_area, "equipo": f_equipo.strip(),
@@ -461,10 +550,13 @@ with tab_input:
                     "problema": f_prob.strip(), "solucion": f_sol.strip(),
                     "resuelto": f_res, "impacto": f_imp.strip(),
                     "observaciones": f_obs.strip(),
+                    "img1": imgs_b64[0], "img2": imgs_b64[1],
+                    "img3": imgs_b64[2], "img4": imgs_b64[3],
                 })
-                etq = f"Semana {sem}" if sem else "sin semana"
-                st.success(f"✅ Atención registrada ({etq}, "
-                           f"{cal.etiqueta_dia(f_fecha)}).")
+                n_fotos = sum(1 for x in imgs_b64 if x)
+                extra = f" con {n_fotos} imagen(es)" if n_fotos else ""
+                st.success(f"✅ Atención registrada (Semana {f_semana}, "
+                           f"Día {f_dia}{extra}).")
 
 
 # =============================================================== TAB: Cargar bitácora
@@ -724,14 +816,18 @@ with tab_dash:
 with tab_datos:
     df = load_atenciones()
     st.subheader("Todas las atenciones")
-    st.caption("Edita cualquier celda. Al guardar, se recalculan semana, día y "
-               "duración a partir de la fecha y las horas. Usa la papelera para "
-               "borrar filas.")
+    st.caption("Edita cualquier celda, incluidas Semana y Día (por si cargaste "
+               "un registro con retraso y quedó en el día equivocado). La "
+               "duración se recalcula de las horas. Usa la papelera para borrar filas.")
 
     if df.empty:
         st.info("Sin datos todavía.")
     else:
-        show = df.rename(columns=COLS)
+        # Ocultar las columnas de imagen en el editor (son base64 enormes);
+        # se conservan al guardar porque update las preserva desde la BD.
+        cols_ocultar = ["img1", "img2", "img3", "img4"]
+        show = df.drop(columns=[c for c in cols_ocultar if c in df.columns])
+        show = show.rename(columns=COLS)
         edited = st.data_editor(
             show, use_container_width=True, hide_index=True, num_rows="dynamic",
             key="editor_datos",
@@ -741,15 +837,25 @@ with tab_datos:
                     "Tipo de mantenimiento", options=TIPOS),
                 "¿Resuelto?": st.column_config.SelectboxColumn(
                     "¿Resuelto?", options=RESUELTO),
-                "Semana": st.column_config.NumberColumn("Semana", disabled=True),
-                "Día": st.column_config.NumberColumn("Día", disabled=True),
+                "Semana": st.column_config.NumberColumn(
+                    "Semana", min_value=1, max_value=10, step=1,
+                    help="Editable: corrige la semana del registro."),
+                "Día": st.column_config.NumberColumn(
+                    "Día", min_value=1, max_value=5, step=1,
+                    help="Editable: corrige el día del registro."),
                 "Duración (min)": st.column_config.NumberColumn(
                     "Duración (min)", disabled=True),
             },
         )
         if st.button("💾 Guardar cambios", type="primary", key="save_datos"):
             inv = {v: k for k, v in COLS.items()}
-            update_atenciones_from_df(edited.rename(columns=inv))
+            edited_int = edited.rename(columns=inv)
+            # Reunir con las columnas de imagen originales (por id) para no perderlas
+            if "id" in edited_int.columns and \
+                    any(c in df.columns for c in cols_ocultar):
+                imgs_df = df[["id"] + [c for c in cols_ocultar if c in df.columns]]
+                edited_int = edited_int.merge(imgs_df, on="id", how="left")
+            update_atenciones_from_df(edited_int)
             st.success("Cambios guardados.")
             st.rerun()
 
@@ -767,6 +873,67 @@ with tab_datos:
                     delete_atencion(id_del)
                     st.success(f"Atención #{id_del} eliminada.")
                     st.rerun()
+
+
+# =============================================================== TAB: Mostrar Bitácoras
+with tab_bitacora:
+    st.subheader("📄 Mostrar Bitácoras — Formato Matriz de Impacto (UNITEC)")
+    st.caption("Genera la bitácora con el formato institucional a partir de "
+               "tus registros. Filtra por semana o día, incluye la evidencia "
+               "fotográfica, y usa el botón Imprimir para guardar como PDF.")
+
+    df_b = load_atenciones()
+    if df_b.empty:
+        st.info("Aún no hay registros para mostrar. Agrega atenciones primero.")
+    else:
+        cf1, cf2, cf3 = st.columns([1.2, 1, 1])
+        with cf1:
+            modo = st.radio("Ver por", ["Toda la práctica", "Semana", "Día"],
+                            horizontal=True, key="bita_modo")
+        sem_sel = None
+        dia_sel = None
+        with cf2:
+            if modo in ("Semana", "Día"):
+                sem_sel = st.selectbox(
+                    "Semana", cal.lista_semanas(),
+                    format_func=lambda n: f"Semana {n}", key="bita_sem")
+        with cf3:
+            if modo == "Día":
+                dia_sel = st.selectbox(
+                    "Día", [1, 2, 3, 4, 5],
+                    format_func=lambda d: f"Día {d}", key="bita_dia")
+
+        # Filtrar
+        dff = df_b.copy()
+        titulo = "Matriz de Impacto — Toda la práctica"
+        if modo == "Semana" and sem_sel:
+            dff = dff[dff["semana"] == sem_sel]
+            titulo = f"Matriz de Impacto — Semana {sem_sel}"
+        elif modo == "Día" and sem_sel and dia_sel:
+            dff = dff[(dff["semana"] == sem_sel) & (dff["dia"] == dia_sel)]
+            titulo = f"Matriz de Impacto — Semana {sem_sel}, Día {dia_sel}"
+
+        # Ordenar por semana y día para lectura natural
+        dff = dff.sort_values(
+            ["semana", "dia", "id"], na_position="last")
+
+        n_reg = len(dff)
+        n_fotos = int(dff[["img1", "img2", "img3", "img4"]].notna().sum().sum()) \
+            if not dff.empty else 0
+        st.markdown(f"**{n_reg}** registro(s) · **{n_fotos}** imagen(es) en el filtro.")
+
+        registros = dff.to_dict("records")
+        html = bitacora_html(registros, titulo=titulo)
+
+        # Vista previa embebida (con scroll) + descarga del HTML
+        st.components.v1.html(html, height=650, scrolling=True)
+        st.download_button(
+            "⬇️ Descargar bitácora (HTML para imprimir)",
+            data=html.encode("utf-8"),
+            file_name=f"{titulo.replace(' ', '_').replace('—','-')}.html",
+            mime="text/html")
+        st.caption("Consejo: abre el HTML descargado y usa Ctrl+P → "
+                   "'Guardar como PDF' para una copia en PDF.")
 
 
 # =============================================================== TAB: Comentarios
