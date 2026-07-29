@@ -97,7 +97,7 @@ def _bloque_imagenes(imgs):
     for src in imgs:
         celdas += (
             f'<div class="img-cell" style="flex:0 0 {col_w}; max-width:{col_w};">'
-            f'<img src="{src}" alt="evidencia"/></div>'
+            f'<img src="{src}" alt="" onerror="this.style.display=\'none\'"/></div>'
         )
 
     return f"""
