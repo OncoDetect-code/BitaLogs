@@ -246,6 +246,33 @@ def delete_atencion(id_: int):
         conn.execute(text("DELETE FROM atenciones WHERE id = :id"), {"id": id_})
 
 
+def update_imagenes(id_: int, imgs: list):
+    """
+    Reemplaza las 4 imágenes de un registro existente por su id.
+    imgs es una lista de hasta 4 data-URIs (o None). Los None dejan
+    ese slot vacío. Útil para agregar fotos a registros antiguos.
+    """
+    imgs = list(imgs[:4]) + [None] * (4 - len(imgs))
+    with get_engine().begin() as conn:
+        conn.execute(text("""
+            UPDATE atenciones
+            SET img1 = :img1, img2 = :img2, img3 = :img3, img4 = :img4
+            WHERE id = :id
+        """), {"id": id_, "img1": imgs[0], "img2": imgs[1],
+               "img3": imgs[2], "img4": imgs[3]})
+
+
+def imagenes_de(id_: int) -> list:
+    """Devuelve las imágenes actuales (data-URIs no vacíos) de un registro."""
+    with get_engine().connect() as conn:
+        row = conn.execute(text(
+            "SELECT img1, img2, img3, img4 FROM atenciones WHERE id = :id"),
+            {"id": id_}).fetchone()
+    if not row:
+        return []
+    return [x for x in row if x and str(x).strip()]
+
+
 # ---- Comentarios de evaluadores
 def insert_comentario(semana: int, evaluador: str, comentario: str):
     with get_engine().begin() as conn:
@@ -858,6 +885,56 @@ with tab_datos:
             update_atenciones_from_df(edited_int)
             st.success("Cambios guardados.")
             st.rerun()
+
+        st.divider()
+        st.subheader("📷 Agregar o cambiar fotos de un registro")
+        st.caption("Selecciona un registro (incluidos los antiguos) y súbele "
+                   "hasta 4 fotos. Reemplaza las que tenga.")
+        etqs_img = [f"#{r['id']}  |  {r['fecha']}  |  S{r['semana']}D{r['dia']}"
+                    f"  |  {r['area']}  |  {r['equipo']}"
+                    for _, r in df.iterrows()]
+        sel_img = st.selectbox("Registro", ["— Selecciona —"] + etqs_img,
+                               key="sel_reg_img")
+        if sel_img != "— Selecciona —":
+            id_img = int(sel_img.split("  |  ")[0].replace("#", "").strip())
+            actuales = imagenes_de(id_img)
+            if actuales:
+                st.write(f"Este registro ya tiene **{len(actuales)}** foto(s):")
+                cols_prev = st.columns(4)
+                for i, src in enumerate(actuales):
+                    with cols_prev[i]:
+                        st.image(src, use_container_width=True)
+            else:
+                st.write("Este registro **no tiene fotos** todavía.")
+
+            nuevas = st.file_uploader(
+                "Nuevas fotos (hasta 4 JPEG) — reemplazan las actuales",
+                type=["jpg", "jpeg", "png"], accept_multiple_files=True,
+                key=f"up_edit_{id_img}")
+            colb1, colb2 = st.columns([1, 1])
+            with colb1:
+                if st.button("💾 Guardar fotos", key=f"save_img_{id_img}",
+                             type="primary"):
+                    if not nuevas:
+                        st.warning("Sube al menos una foto primero.")
+                    else:
+                        procesadas = []
+                        for archivo in nuevas[:4]:
+                            b64 = _img_a_base64(archivo)
+                            if b64:
+                                procesadas.append(b64)
+                        if len(nuevas) > 4:
+                            st.warning("Solo se guardaron las primeras 4.")
+                        update_imagenes(id_img, procesadas)
+                        st.success(f"✅ {len(procesadas)} foto(s) guardadas en "
+                                   f"el registro #{id_img}.")
+                        st.rerun()
+            with colb2:
+                if actuales and st.button("🗑️ Quitar todas las fotos",
+                                          key=f"clear_img_{id_img}"):
+                    update_imagenes(id_img, [])
+                    st.success(f"Fotos del registro #{id_img} eliminadas.")
+                    st.rerun()
 
         st.divider()
         st.subheader("🗑️ Eliminar una atención")
