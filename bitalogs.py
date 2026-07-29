@@ -191,54 +191,77 @@ def load_atenciones() -> pd.DataFrame:
 
 def update_atenciones_from_df(df_edit: pd.DataFrame):
     """
-    Reescribe la tabla con el contenido editado. Respeta la semana y el día
-    que el usuario haya puesto a mano (para poder corregir, p.ej., un registro
-    que se cargó tarde). Solo si semana/día vienen vacíos los deduce de la fecha.
+    Aplica los cambios del editor SIN borrar toda la tabla, para preservar
+    los id y las imágenes. Para cada fila:
+      - si trae id existente -> UPDATE de sus campos (no toca las imágenes)
+      - si no trae id (fila nueva) -> INSERT
+    Las filas que estaban y ya no aparecen se eliminan.
+    Respeta semana/día editados a mano; si faltan, los deduce de la fecha.
     """
+    campos = ["fecha", "semana", "dia", "hora_inicio", "hora_fin",
+              "duracion_min", "area", "equipo", "marca", "modelo", "serie",
+              "tipo", "problema", "solucion", "resuelto", "impacto",
+              "observaciones"]
+
+    def _norm_row(r):
+        fecha = str(r.get("fecha", "")).strip()[:10]
+        sem = r.get("semana"); dia = r.get("dia")
+        sem = int(sem) if str(sem).strip() not in ("", "None", "nan") else None
+        dia = int(dia) if str(dia).strip() not in ("", "None", "nan") else None
+        if (sem is None or dia is None) and fecha:
+            try:
+                fd = datetime.strptime(fecha, "%Y-%m-%d").date()
+                if sem is None:
+                    sem = cal.semana_de_fecha(fd)
+                if dia is None:
+                    dia = cal.dia_de_semana_num(fd)
+            except ValueError:
+                pass
+        hi = str(r.get("hora_inicio", "") or "")
+        hf = str(r.get("hora_fin", "") or "")
+        return {
+            "fecha": fecha, "semana": sem, "dia": dia,
+            "hora_inicio": hi, "hora_fin": hf, "duracion_min": _dur_min(hi, hf),
+            "area": r.get("area"), "equipo": r.get("equipo"),
+            "marca": r.get("marca"), "modelo": r.get("modelo"),
+            "serie": r.get("serie"), "tipo": r.get("tipo"),
+            "problema": r.get("problema"), "solucion": r.get("solucion"),
+            "resuelto": r.get("resuelto"), "impacto": r.get("impacto"),
+            "observaciones": r.get("observaciones"),
+        }
+
     with get_engine().begin() as conn:
-        conn.execute(text("DELETE FROM atenciones"))
+        # ids que existían antes
+        prev = {row[0] for row in conn.execute(
+            text("SELECT id FROM atenciones")).fetchall()}
+        vistos = set()
+
         for _, r in df_edit.iterrows():
             fecha = str(r.get("fecha", "")).strip()
             if not fecha:
                 continue
-            # Tomar semana/día tal como el usuario los dejó
-            sem = r.get("semana")
-            dia = r.get("dia")
-            sem = int(sem) if str(sem).strip() not in ("", "None", "nan") else None
-            dia = int(dia) if str(dia).strip() not in ("", "None", "nan") else None
-            # Si faltan, deducir de la fecha (comportamiento anterior)
-            if sem is None or dia is None:
-                try:
-                    fd = datetime.strptime(fecha[:10], "%Y-%m-%d").date()
-                    if sem is None:
-                        sem = cal.semana_de_fecha(fd)
-                    if dia is None:
-                        dia = cal.dia_de_semana_num(fd)
-                except ValueError:
-                    pass
-            hi = str(r.get("hora_inicio", "") or "")
-            hf = str(r.get("hora_fin", "") or "")
-            conn.execute(text("""
-                INSERT INTO atenciones
-                (fecha, semana, dia, hora_inicio, hora_fin, duracion_min, area,
-                 equipo, marca, modelo, serie, tipo, problema, solucion,
-                 resuelto, impacto, observaciones, img1, img2, img3, img4)
-                VALUES (:fecha, :semana, :dia, :hora_inicio, :hora_fin,
-                        :duracion_min, :area, :equipo, :marca, :modelo, :serie,
-                        :tipo, :problema, :solucion, :resuelto, :impacto,
-                        :observaciones, :img1, :img2, :img3, :img4)
-            """), {
-                "fecha": fecha[:10], "semana": sem, "dia": dia,
-                "hora_inicio": hi, "hora_fin": hf, "duracion_min": _dur_min(hi, hf),
-                "area": r.get("area"), "equipo": r.get("equipo"),
-                "marca": r.get("marca"), "modelo": r.get("modelo"),
-                "serie": r.get("serie"), "tipo": r.get("tipo"),
-                "problema": r.get("problema"), "solucion": r.get("solucion"),
-                "resuelto": r.get("resuelto"), "impacto": r.get("impacto"),
-                "observaciones": r.get("observaciones"),
-                "img1": r.get("img1"), "img2": r.get("img2"),
-                "img3": r.get("img3"), "img4": r.get("img4"),
-            })
+            vals = _norm_row(r)
+            rid = r.get("id")
+            tiene_id = str(rid).strip() not in ("", "None", "nan")
+            if tiene_id:
+                rid = int(float(rid))
+                vistos.add(rid)
+                set_clause = ", ".join(f"{c} = :{c}" for c in campos)
+                conn.execute(
+                    text(f"UPDATE atenciones SET {set_clause} WHERE id = :id"),
+                    {**vals, "id": rid})
+            else:
+                # fila nueva: insertar (sin imágenes)
+                cols = ", ".join(campos)
+                ph = ", ".join(f":{c}" for c in campos)
+                conn.execute(
+                    text(f"INSERT INTO atenciones ({cols}) VALUES ({ph})"), vals)
+
+        # eliminar las filas que el usuario quitó del editor
+        borrar = prev - vistos
+        for rid in borrar:
+            conn.execute(text("DELETE FROM atenciones WHERE id = :id"),
+                         {"id": rid})
 
 
 def delete_atencion(id_: int):
@@ -876,13 +899,7 @@ with tab_datos:
         )
         if st.button("💾 Guardar cambios", type="primary", key="save_datos"):
             inv = {v: k for k, v in COLS.items()}
-            edited_int = edited.rename(columns=inv)
-            # Reunir con las columnas de imagen originales (por id) para no perderlas
-            if "id" in edited_int.columns and \
-                    any(c in df.columns for c in cols_ocultar):
-                imgs_df = df[["id"] + [c for c in cols_ocultar if c in df.columns]]
-                edited_int = edited_int.merge(imgs_df, on="id", how="left")
-            update_atenciones_from_df(edited_int)
+            update_atenciones_from_df(edited.rename(columns=inv))
             st.success("Cambios guardados.")
             st.rerun()
 
@@ -954,19 +971,22 @@ with tab_datos:
 
 # =============================================================== TAB: Mostrar Bitácoras
 with tab_bitacora:
-    st.subheader("📄 Mostrar Bitácoras — Formato Matriz de Impacto (UNITEC)")
+    st.subheader("📄 Mostrar Bitácoras — Matriz de Impacto")
     st.caption("Genera la bitácora con el formato institucional a partir de "
-               "tus registros. Filtra por semana o día, incluye la evidencia "
-               "fotográfica, y usa el botón Imprimir para guardar como PDF.")
+               "tus registros. Filtra la tabla y la evidencia fotográfica por "
+               "semana o día, y usa el botón Imprimir para guardar como PDF.")
 
     df_b = load_atenciones()
     if df_b.empty:
         st.info("Aún no hay registros para mostrar. Agrega atenciones primero.")
     else:
+        # ---- Filtro de la TABLA ----
+        st.markdown("**Ver por**")
         cf1, cf2, cf3 = st.columns([1.2, 1, 1])
         with cf1:
-            modo = st.radio("Ver por", ["Toda la práctica", "Semana", "Día"],
-                            horizontal=True, key="bita_modo")
+            modo = st.radio("Registros", ["Toda la práctica", "Semana", "Día"],
+                            horizontal=True, key="bita_modo",
+                            label_visibility="collapsed")
         sem_sel = None
         dia_sel = None
         with cf2:
@@ -980,7 +1000,29 @@ with tab_bitacora:
                     "Día", [1, 2, 3, 4, 5],
                     format_func=lambda d: f"Día {d}", key="bita_dia")
 
-        # Filtrar
+        # ---- Filtro independiente de EVIDENCIA FOTOGRÁFICA ----
+        st.markdown("**Evidencia fotográfica**")
+        ff1, ff2, ff3 = st.columns([1.2, 1, 1])
+        with ff1:
+            modo_fotos = st.radio(
+                "Fotos", ["Todas", "Por semana", "Por día", "Sin fotos"],
+                horizontal=True, key="fotos_modo",
+                label_visibility="collapsed",
+                help="Elige qué evidencia fotográfica incluir en la bitácora.")
+        foto_sem = None
+        foto_dia = None
+        with ff2:
+            if modo_fotos in ("Por semana", "Por día"):
+                foto_sem = st.selectbox(
+                    "Semana (fotos)", cal.lista_semanas(),
+                    format_func=lambda n: f"Semana {n}", key="foto_sem")
+        with ff3:
+            if modo_fotos == "Por día":
+                foto_dia = st.selectbox(
+                    "Día (fotos)", [1, 2, 3, 4, 5],
+                    format_func=lambda d: f"Día {d}", key="foto_dia")
+
+        # ---- Aplicar filtro de la tabla ----
         dff = df_b.copy()
         titulo = "Matriz de Impacto — Toda la práctica"
         if modo == "Semana" and sem_sel:
@@ -990,19 +1032,43 @@ with tab_bitacora:
             dff = dff[(dff["semana"] == sem_sel) & (dff["dia"] == dia_sel)]
             titulo = f"Matriz de Impacto — Semana {sem_sel}, Día {dia_sel}"
 
-        # Ordenar por semana y día para lectura natural
-        dff = dff.sort_values(
-            ["semana", "dia", "id"], na_position="last")
+        dff = dff.sort_values(["semana", "dia", "id"], na_position="last")
 
-        n_reg = len(dff)
-        n_fotos = int(dff[["img1", "img2", "img3", "img4"]].notna().sum().sum()) \
-            if not dff.empty else 0
-        st.markdown(f"**{n_reg}** registro(s) · **{n_fotos}** imagen(es) en el filtro.")
+        # ---- Decidir en qué registros se muestran las fotos ----
+        # Copiamos el df y vaciamos las imágenes de los registros que no
+        # deban mostrarlas, según el filtro de evidencia (independiente).
+        dff_show = dff.copy()
+        cols_img = ["img1", "img2", "img3", "img4"]
 
-        registros = dff.to_dict("records")
+        def _borrar_fotos(mask):
+            for c in cols_img:
+                if c in dff_show.columns:
+                    dff_show.loc[mask, c] = None
+
+        if modo_fotos == "Sin fotos":
+            _borrar_fotos(dff_show.index.notna())  # todas
+        elif modo_fotos == "Por semana" and foto_sem:
+            _borrar_fotos(dff_show["semana"] != foto_sem)
+        elif modo_fotos == "Por día" and foto_sem and foto_dia:
+            _borrar_fotos(~((dff_show["semana"] == foto_sem) &
+                            (dff_show["dia"] == foto_dia)))
+        # "Todas" -> no se borra nada
+
+        # ---- Contadores ----
+        n_reg = len(dff_show)
+        def _tiene(v):
+            return v is not None and str(v).strip() not in ("", "None", "nan")
+        n_fotos = 0
+        if not dff_show.empty:
+            for c in cols_img:
+                if c in dff_show.columns:
+                    n_fotos += int(dff_show[c].apply(_tiene).sum())
+        st.markdown(f"**{n_reg}** registro(s) · **{n_fotos}** imagen(es) "
+                    "en la evidencia.")
+
+        registros = dff_show.to_dict("records")
         html = bitacora_html(registros, titulo=titulo)
 
-        # Vista previa embebida (con scroll) + descarga del HTML
         st.components.v1.html(html, height=650, scrolling=True)
         st.download_button(
             "⬇️ Descargar bitácora (HTML para imprimir)",
