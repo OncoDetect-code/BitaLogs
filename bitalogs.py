@@ -34,6 +34,7 @@ from sqlalchemy import create_engine, text
 import calendario as cal
 from importar_bitacora import leer_matriz
 from formato_bitacora import bitacora_html
+from reporte_pdf import construir_pdf
 from splash import mostrar_splash
 
 # Honduras usa UTC-6 todo el año (sin horario de verano). En Streamlit
@@ -53,6 +54,9 @@ AREAS = ["Hospitalización A", "Hospitalización B", "UCI A", "UCI B",
 TIPOS = ["Preventivo", "Correctivo", "Revisión y Diagnóstico",
          "Instalación", "Capacitación", "Otro"]
 RESUELTO = ["Sí", "Parcial", "No"]
+TIPOS_ACTIVIDAD_EXTRA = ["Visita técnica", "Infografía / material educativo",
+                        "Protocolo", "Revisión de equipos (sin mantenimiento)",
+                        "Reunión / capacitación recibida", "Otro"]
 
 # Nombres bonitos de columnas (mostrar y exportar)
 COLS = {
@@ -103,6 +107,20 @@ def init_db():
                 evaluador TEXT NOT NULL,
                 comentario TEXT NOT NULL,
                 fecha_registro TEXT NOT NULL
+            )
+        """))
+        # Actividades que NO son mantenimiento de un equipo puntual
+        # (visitas, infografías, protocolos, reuniones...). Se registran
+        # aparte porque no tienen "equipo/marca/serie", solo tiempo
+        # invertido. Tabla nueva -> no afecta nada de 'atenciones'.
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS actividades_extra (
+                id SERIAL PRIMARY KEY,
+                fecha TEXT NOT NULL,
+                semana INTEGER, dia INTEGER,
+                tipo_actividad TEXT NOT NULL,
+                descripcion TEXT,
+                horas REAL NOT NULL
             )
         """))
         # Columnas para hasta 4 imágenes (base64). ADD COLUMN IF NOT EXISTS
@@ -187,6 +205,101 @@ def load_atenciones() -> pd.DataFrame:
     with get_engine().connect() as conn:
         return pd.read_sql_query(
             text("SELECT * FROM atenciones ORDER BY fecha DESC, id DESC"), conn)
+
+
+def insert_actividad_extra(d: dict):
+    """Guarda una actividad que no es mantenimiento de equipo (solo tiempo)."""
+    with get_engine().begin() as conn:
+        conn.execute(text("""
+            INSERT INTO actividades_extra
+            (fecha, semana, dia, tipo_actividad, descripcion, horas)
+            VALUES (:fecha, :semana, :dia, :tipo_actividad, :descripcion, :horas)
+        """), d)
+
+
+def load_actividades_extra() -> pd.DataFrame:
+    with get_engine().connect() as conn:
+        return pd.read_sql_query(
+            text("SELECT * FROM actividades_extra ORDER BY fecha DESC, id DESC"),
+            conn)
+
+
+def delete_actividad_extra(id_: int):
+    with get_engine().begin() as conn:
+        conn.execute(text("DELETE FROM actividades_extra WHERE id = :id"),
+                    {"id": id_})
+
+
+def normalizar_tipo_actividad(texto: str) -> str:
+    """
+    Cuando el usuario escribe libremente el nombre de una actividad
+    (opción 'Otro'), busca si ya existe una actividad igual -sin
+    importar mayúsculas/minúsculas ni espacios extra- entre las
+    categorías fijas y las ya guardadas en la base, y devuelve esa
+    misma forma para que el gráfico las sume juntas en un solo
+    registro en vez de crear una categoría duplicada.
+    """
+    texto = (texto or "").strip()
+    if not texto:
+        return "Otro"
+    existentes = list(TIPOS_ACTIVIDAD_EXTRA)
+    try:
+        existentes += load_actividades_extra()["tipo_actividad"].dropna().tolist()
+    except Exception:
+        pass
+    clave = texto.lower()
+    for e in existentes:
+        if str(e).strip().lower() == clave:
+            return str(e).strip()
+    return texto
+
+
+def update_actividades_extra_from_df(df_edit: pd.DataFrame):
+    """
+    Aplica los cambios del editor de 'Otra actividad' (edición y
+    borrado de filas), igual que se hace con las atenciones: por id,
+    sin recrear toda la tabla.
+    """
+    with get_engine().begin() as conn:
+        prev = {row[0] for row in conn.execute(
+            text("SELECT id FROM actividades_extra")).fetchall()}
+        vistos = set()
+        for _, r in df_edit.iterrows():
+            rid = r.get("id")
+            tiene_id = pd.notna(rid) and str(rid).strip() not in ("", "None")
+            horas = pd.to_numeric(r.get("horas"), errors="coerce")
+            horas = float(horas) if pd.notna(horas) else 0.0
+            sem = pd.to_numeric(r.get("semana"), errors="coerce")
+            dia = pd.to_numeric(r.get("dia"), errors="coerce")
+            vals = {
+                "fecha": str(r.get("fecha", "")).strip()[:10],
+                "semana": int(sem) if pd.notna(sem) else None,
+                "dia": int(dia) if pd.notna(dia) else None,
+                "tipo_actividad": normalizar_tipo_actividad(r.get("tipo_actividad")),
+                "descripcion": r.get("descripcion") or "",
+                "horas": horas,
+            }
+            if tiene_id:
+                rid = int(rid)
+                vistos.add(rid)
+                vals["id"] = rid
+                conn.execute(text("""
+                    UPDATE actividades_extra
+                    SET fecha=:fecha, semana=:semana, dia=:dia,
+                        tipo_actividad=:tipo_actividad,
+                        descripcion=:descripcion, horas=:horas
+                    WHERE id=:id
+                """), vals)
+            else:
+                conn.execute(text("""
+                    INSERT INTO actividades_extra
+                    (fecha, semana, dia, tipo_actividad, descripcion, horas)
+                    VALUES (:fecha, :semana, :dia, :tipo_actividad,
+                            :descripcion, :horas)
+                """), vals)
+        for rid in prev - vistos:
+            conn.execute(text("DELETE FROM actividades_extra WHERE id=:id"),
+                        {"id": rid})
 
 
 def _orden_secuencial(df: pd.DataFrame) -> pd.DataFrame:
@@ -546,7 +659,7 @@ with st.sidebar:
         mostrar_splash(st, forzar=True)
 
 tab_dash, tab_input, tab_carga, tab_datos, tab_bitacora, tab_coment = st.tabs(
-    ["📊 Dashboard", "➕ Nueva atención", "📥 Cargar bitácora",
+    ["📊 Dashboard", "➕ Nuevo registro", "📥 Cargar bitácora",
      "🗂️ Datos", "📄 Mostrar Bitácoras", "💬 Comentarios"])
 
 
@@ -650,6 +763,97 @@ with tab_input:
                 st.success(f"✅ Atención registrada (Semana {f_semana}, "
                            f"Día {f_dia}{extra}).")
 
+    # -------------------------------------------- Otras actividades (sin equipo)
+    st.divider()
+    st.subheader("🕒 Otra actividad (no mantenimiento de equipo)")
+    st.caption("Para visitas, infografías, protocolos, reuniones u otras "
+               "actividades de la práctica que no son la atención puntual "
+               "de un equipo: registra solo el tiempo invertido.")
+
+    # El selectbox de tipo va FUERA del form para poder mostrar el campo
+    # libre de "¿Cuál actividad?" de inmediato cuando elige "Otro" (dentro
+    # de un st.form los widgets no reaccionan hasta enviar).
+    a_tipo_sel = st.selectbox("Actividad", TIPOS_ACTIVIDAD_EXTRA, key="af_tipo")
+    a_otro = ""
+    if a_tipo_sel == "Otro":
+        a_otro = st.text_input(
+            "¿Cuál actividad? (si coincide con una ya registrada, sus horas "
+            "se suman juntas automáticamente)",
+            placeholder="Ej. Auditoría de inventario", key="af_otro")
+
+    with st.form("nueva_actividad", clear_on_submit=True):
+        ac1, ac2, ac3 = st.columns(3)
+        with ac1:
+            a_fecha = st.date_input("Fecha", value=hoy_hn(), key="af_fecha")
+        with ac2:
+            _sem_sug2 = cal.semana_de_fecha(a_fecha) or 1
+            _dia_sug2 = cal.dia_de_semana_num(a_fecha) or 1
+            a_semana = st.selectbox(
+                "Semana", cal.lista_semanas(),
+                index=cal.lista_semanas().index(_sem_sug2), key="af_sem")
+            a_dia = st.selectbox("Día", [1, 2, 3, 4, 5], index=_dia_sug2 - 1,
+                                 format_func=lambda d: f"Día {d}", key="af_dia")
+        with ac3:
+            a_horas = st.number_input(
+                "Tiempo invertido (horas)", min_value=0.0, max_value=12.0,
+                step=0.5, value=1.0, key="af_horas")
+
+        a_desc = st.text_input(
+            "Descripción (opcional)",
+            placeholder="Ej. Visita a CIPS de Occidente", key="af_desc")
+
+        env2 = st.form_submit_button("Guardar actividad", type="primary")
+        if env2:
+            if a_tipo_sel == "Otro" and not a_otro.strip():
+                st.error("Escribe el nombre de la actividad en '¿Cuál actividad?'.")
+            else:
+                tipo_final = (normalizar_tipo_actividad(a_otro)
+                             if a_tipo_sel == "Otro" else a_tipo_sel)
+                insert_actividad_extra({
+                    "fecha": a_fecha.isoformat(), "semana": int(a_semana),
+                    "dia": int(a_dia), "tipo_actividad": tipo_final,
+                    "descripcion": a_desc.strip(), "horas": float(a_horas),
+                })
+                st.success(f"✅ Actividad registrada ({a_horas} h, "
+                           f"Semana {a_semana}, Día {a_dia}).")
+
+    with st.expander("Ver / editar / eliminar actividades registradas"):
+        dfa = load_actividades_extra()
+        if dfa.empty:
+            st.caption("Aún no hay actividades registradas.")
+        else:
+            dfa_show = dfa.sort_values(
+                ["semana", "dia", "fecha"], na_position="last").reset_index(drop=True)
+            show_a = dfa_show.rename(columns={
+                "id": "ID", "fecha": "Fecha", "semana": "Semana", "dia": "Día",
+                "tipo_actividad": "Actividad", "descripcion": "Descripción",
+                "horas": "Horas"})
+            st.caption("Edita cualquier celda y presiona 'Guardar cambios'. "
+                       "Para borrar una fila, selecciónala con el check de la "
+                       "izquierda y presiona la papelera. Si escribes en "
+                       "'Actividad' un nombre igual a uno ya existente (aunque "
+                       "cambien mayúsculas o espacios), se fusiona con ese y "
+                       "las horas se suman en el mismo grupo del gráfico.")
+            edited_act = st.data_editor(
+                show_a, use_container_width=True, hide_index=True,
+                num_rows="dynamic", key="editor_actividades",
+                column_config={
+                    "ID": st.column_config.NumberColumn("ID", disabled=True),
+                    "Horas": st.column_config.NumberColumn(
+                        "Horas", min_value=0.0, step=0.5, format="%.1f"),
+                    "Semana": st.column_config.NumberColumn(
+                        "Semana", min_value=1, step=1),
+                    "Día": st.column_config.NumberColumn(
+                        "Día", min_value=1, max_value=5, step=1),
+                })
+            if st.button("💾 Guardar cambios", key="save_act"):
+                inv_a = {"ID": "id", "Fecha": "fecha", "Semana": "semana",
+                         "Día": "dia", "Actividad": "tipo_actividad",
+                         "Descripción": "descripcion", "Horas": "horas"}
+                update_actividades_extra_from_df(edited_act.rename(columns=inv_a))
+                st.success("✅ Cambios guardados.")
+                st.rerun()
+
 
 # =============================================================== TAB: Cargar bitácora
 with tab_carga:
@@ -740,7 +944,7 @@ with tab_carga:
 with tab_dash:
     df = _prep(load_atenciones())
     if df.empty:
-        st.info("Aún no hay atenciones. Regístralas en '➕ Nueva atención' "
+        st.info("Aún no hay atenciones. Regístralas en '➕ Nuevo registro' "
                 "o carga tu bitácora en '📥 Cargar bitácora'.")
     else:
         with st.sidebar:
@@ -826,6 +1030,58 @@ with tab_dash:
         fig_h.update_traces(line_color="#1F4E78")
         st.plotly_chart(fig_h, use_container_width=True)
 
+        # ---- Distribución de tiempo por tipo de actividad ----
+        # Combina las horas de mantenimiento de equipo (calculadas de
+        # hora_inicio/hora_fin en 'atenciones') con las horas de otras
+        # actividades (visitas, infografías, etc.) cargadas en
+        # 'actividades_extra', respetando el mismo filtro de Semana/
+        # Día/Toda la práctica que el resto del Dashboard.
+        st.divider()
+        st.subheader("⏱️ Distribución de tiempo por tipo de actividad")
+
+        df_act = load_actividades_extra()
+        df_act["_fecha"] = pd.to_datetime(df_act.get("fecha"), errors="coerce")
+        fdf_act = df_act.copy()
+        if modo == "Semana" and sem_sel:
+            fdf_act = fdf_act[fdf_act["semana"] == sem_sel]
+        elif modo == "Día" and dia_fecha is not None:
+            fdf_act = fdf_act[fdf_act["_fecha"].dt.date == dia_fecha]
+
+        horas_mant = fdf["duracion_min"].dropna().sum() / 60.0
+        horas_extra_tot = fdf_act["horas"].dropna().sum() if not fdf_act.empty else 0.0
+        extra_por_tipo = (fdf_act.groupby("tipo_actividad")["horas"].sum()
+                          if not fdf_act.empty else pd.Series(dtype=float))
+
+        dist = pd.concat([
+            pd.Series({"Mantenimiento de equipos": horas_mant}),
+            extra_por_tipo,
+        ]).rename_axis("Tipo de actividad").reset_index(name="Horas")
+        dist = dist[dist["Horas"] > 0].sort_values("Horas", ascending=True)
+
+        if dist.empty:
+            st.info("Aún no hay horas registradas (ni de mantenimiento ni de "
+                    "otras actividades) para este filtro.")
+            fig_dist = None
+        else:
+            # Paleta institucional de al menos 3 colores; si hay más
+            # categorías que colores, Plotly la repite en ciclo.
+            PALETA_ACTIVIDADES = ["#1F4E78", "#2E8B57", "#C0392B",
+                                  "#8E44AD", "#D68910"]
+            fig_dist = px.bar(dist, x="Horas", y="Tipo de actividad",
+                              orientation="h", text="Horas",
+                              color="Tipo de actividad",
+                              color_discrete_sequence=PALETA_ACTIVIDADES,
+                              title="Horas invertidas por tipo de actividad")
+            fig_dist.update_traces(texttemplate="%{text:.1f} h",
+                                   textposition="outside")
+            fig_dist.update_layout(yaxis_title="", xaxis_title="Horas",
+                                   showlegend=False)
+            st.plotly_chart(fig_dist, use_container_width=True)
+            dk1, dk2, dk3 = st.columns(3)
+            dk1.metric("Horas mantenimiento", f"{horas_mant:.1f} h")
+            dk2.metric("Horas otras actividades", f"{horas_extra_tot:.1f} h")
+            dk3.metric("Total registrado", f"{horas_mant + horas_extra_tot:.1f} h")
+
         # ---- Gráficos de rendimiento ----
         st.divider()
         g1, g2 = st.columns(2)
@@ -886,6 +1142,49 @@ with tab_dash:
                           title="Equipos atendidos por semana", text="Equipos")
             fig5.update_traces(marker_color="#2E8B57", textposition="outside")
             st.plotly_chart(fig5, use_container_width=True)
+
+        # ---- Reporte PDF (llamativo, imprimible) ----
+        st.divider()
+        if modo == "Semana" and sem_sel:
+            etiqueta_periodo = f"Semana {sem_sel}"
+        elif modo == "Día" and dia_fecha is not None:
+            etiqueta_periodo = cal.etiqueta_dia(dia_fecha)
+        else:
+            etiqueta_periodo = "Toda la práctica"
+
+        st.subheader(f"📄 Reporte PDF — {etiqueta_periodo}")
+        st.caption("Compila los gráficos más importantes de la selección "
+                   "actual (arriba: Semana / Día / Toda la práctica) en un "
+                   "PDF con el estilo institucional, listo para descargar.")
+
+        if st.button("Generar PDF", key="gen_pdf_dash"):
+            with st.spinner("Generando PDF..."):
+                kpis_pdf = {
+                    "Equipos atendidos": str(total),
+                    "Horas acumuladas": f"{horas_acum} h",
+                    "Horas mantenimiento": f"{horas_mant:.1f} h",
+                    "Progreso": f"{horas_acum/horas_tot*100:.0f}%",
+                }
+                figuras_pdf = []
+                if fig_dist is not None:
+                    figuras_pdf.append(
+                        ("Distribución de tiempo por tipo de actividad", fig_dist))
+                if not por_area.empty:
+                    figuras_pdf.append(("Equipos por área", fig))
+                figuras_pdf.append(("Tipo de mantenimiento", fig2))
+                if modo == "Toda la práctica":
+                    figuras_pdf.append(("Horas acumuladas por semana", fig_h))
+                    figuras_pdf.append(("Equipos atendidos por semana", fig5))
+
+                pdf_bytes = construir_pdf(
+                    titulo="BitaLogs — Reporte de Indicadores",
+                    subtitulo=f"Ingeniería Biomédica · UNITEC · {etiqueta_periodo}",
+                    kpis=kpis_pdf, figuras=figuras_pdf)
+
+            st.download_button(
+                "📥 Descargar PDF", data=pdf_bytes,
+                file_name=f"BitaLogs_Reporte_{etiqueta_periodo.replace(' ', '_')}.pdf",
+                mime="application/pdf", key="dl_pdf_dash")
 
         # ---- Exportar ----
         st.divider()
