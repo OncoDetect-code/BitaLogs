@@ -151,8 +151,13 @@ def _tarjetas_kpis(pdf, kpis: dict):
         x = _MX + i * (ancho + gap)
         color = _KPI_COLORES[i % len(_KPI_COLORES)]
         pdf.set_fill_color(*color)
-        pdf.rect(x, y0, ancho, alto, style="F", round_corners=True,
-                 corner_radius=1.5)
+        # round_corners requiere fpdf2 >= 2.8.7; si la versión instalada
+        # no lo soporta, se cae a esquinas rectas en vez de romper.
+        try:
+            pdf.rect(x, y0, ancho, alto, style="F", round_corners=True,
+                     corner_radius=1.5)
+        except TypeError:
+            pdf.rect(x, y0, ancho, alto, style="F")
         pdf.set_xy(x, y0 + 3.5)
         pdf.set_font("Helvetica", "B", 17)
         pdf.set_text_color(*_BLANCO)

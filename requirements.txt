@@ -2,7 +2,7 @@ streamlit
 pandas
 plotly
 kaleido==0.2.1
-fpdf2
+fpdf2>=2.8.7
 openpyxl
 Pillow
 sqlalchemy
