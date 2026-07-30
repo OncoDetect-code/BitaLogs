@@ -34,7 +34,7 @@ from sqlalchemy import create_engine, text
 import calendario as cal
 from importar_bitacora import leer_matriz
 from formato_bitacora import bitacora_html
-from reporte_pdf import construir_pdf
+from reporte_pdf import construir_pdf, construir_pdf_multi
 from splash import mostrar_splash
 
 # Honduras usa UTC-6 todo el año (sin horario de verano). En Streamlit
@@ -672,6 +672,74 @@ def _prep(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def construir_bloque_indicadores(fdf, fdf_act, etiqueta, horas_acum, horas_tot):
+    """
+    Dado un subconjunto ya filtrado de atenciones (fdf) y de actividades
+    extra (fdf_act), arma el dict de KPIs y la lista de (título, figura)
+    para el PDF. Se usa tanto para el reporte de un periodo como para
+    cada semana del reporte compilado 1-10, así los dos salen idénticos.
+    """
+    total = len(fdf)
+    horas_mant = fdf["duracion_min"].dropna().sum() / 60.0 if not fdf.empty else 0.0
+    horas_extra = fdf_act["horas"].dropna().sum() if not fdf_act.empty else 0.0
+    prog = (horas_acum / horas_tot * 100) if horas_tot else 0
+
+    kpis = {
+        "Equipos atendidos": str(total),
+        "Horas acumuladas": f"{horas_acum} h",
+        "Horas mantenimiento": f"{horas_mant:.1f} h",
+        "Otras actividades": f"{horas_extra:.1f} h",
+        "Progreso": f"{prog:.0f}%",
+    }
+
+    figuras = []
+
+    # 1) Distribución de tiempo por tipo de actividad
+    extra_por_tipo = (fdf_act.groupby("tipo_actividad")["horas"].sum()
+                      if not fdf_act.empty else pd.Series(dtype=float))
+    dist = pd.concat([
+        pd.Series({"Mantenimiento de equipos": horas_mant}),
+        extra_por_tipo,
+    ]).rename_axis("Tipo de actividad").reset_index(name="Horas")
+    dist = dist[dist["Horas"] > 0].sort_values("Horas", ascending=True)
+    if not dist.empty:
+        PAL = ["#1F4E78", "#2E8B57", "#C0392B", "#8E44AD", "#D68910"]
+        fdist = px.bar(dist, x="Horas", y="Tipo de actividad", orientation="h",
+                       text="Horas", color="Tipo de actividad",
+                       color_discrete_sequence=PAL)
+        fdist.update_traces(texttemplate="%{text:.1f} h", textposition="outside")
+        fdist.update_layout(showlegend=False, yaxis_title="", xaxis_title="Horas")
+        figuras.append(("Distribucion de tiempo", fdist))
+
+    if not fdf.empty:
+        # 2) Equipos por área
+        por_area = (fdf.groupby("area").size().rename_axis("Área")
+                    .reset_index(name="Equipos"))
+        por_area = por_area[por_area["Equipos"] > 0]
+        if not por_area.empty:
+            fa = px.bar(por_area, x="Área", y="Equipos", text="Equipos")
+            fa.update_layout(xaxis_tickangle=-40)
+            figuras.append(("Equipos por area", fa))
+
+        # 3) Tipo de mantenimiento
+        por_tipo = (fdf.groupby("tipo").size().rename_axis("Tipo")
+                    .reset_index(name="Cantidad"))
+        if not por_tipo.empty:
+            ft = px.pie(por_tipo, names="Tipo", values="Cantidad", hole=0.4)
+            figuras.append(("Tipo de mantenimiento", ft))
+
+        # 4) Estado de resolución
+        por_res = (fdf.groupby("resuelto").size()
+                   .reindex(RESUELTO, fill_value=0)
+                   .rename_axis("Estado").reset_index(name="Cantidad"))
+        por_res = por_res[por_res["Cantidad"] > 0]
+        if not por_res.empty:
+            fr = px.pie(por_res, names="Estado", values="Cantidad", hole=0.4)
+            figuras.append(("Estado de resolucion", fr))
+
+    return kpis, figuras
+
+
 # =============================================================== TAB: Nueva atención
 with tab_input:
     st.subheader("Registrar una atención a equipo")
@@ -1143,7 +1211,7 @@ with tab_dash:
             fig5.update_traces(marker_color="#2E8B57", textposition="outside")
             st.plotly_chart(fig5, use_container_width=True)
 
-        # ---- Reporte PDF (llamativo, imprimible) ----
+        # ---- Reporte PDF (dashboard, imprimible) ----
         st.divider()
         if modo == "Semana" and sem_sel:
             etiqueta_periodo = f"Semana {sem_sel}"
@@ -1153,38 +1221,57 @@ with tab_dash:
             etiqueta_periodo = "Toda la práctica"
 
         st.subheader(f"📄 Reporte PDF — {etiqueta_periodo}")
-        st.caption("Compila los gráficos más importantes de la selección "
-                   "actual (arriba: Semana / Día / Toda la práctica) en un "
-                   "PDF con el estilo institucional, listo para descargar.")
 
-        if st.button("Generar PDF", key="gen_pdf_dash"):
-            with st.spinner("Generando PDF..."):
-                kpis_pdf = {
-                    "Equipos atendidos": str(total),
-                    "Horas acumuladas": f"{horas_acum} h",
-                    "Horas mantenimiento": f"{horas_mant:.1f} h",
-                    "Progreso": f"{horas_acum/horas_tot*100:.0f}%",
-                }
-                figuras_pdf = []
-                if fig_dist is not None:
-                    figuras_pdf.append(
-                        ("Distribución de tiempo por tipo de actividad", fig_dist))
-                if not por_area.empty:
-                    figuras_pdf.append(("Equipos por área", fig))
-                figuras_pdf.append(("Tipo de mantenimiento", fig2))
-                if modo == "Toda la práctica":
-                    figuras_pdf.append(("Horas acumuladas por semana", fig_h))
-                    figuras_pdf.append(("Equipos atendidos por semana", fig5))
+        cpdf1, cpdf2 = st.columns(2)
 
-                pdf_bytes = construir_pdf(
-                    titulo="BitaLogs — Reporte de Indicadores",
-                    subtitulo=f"Ingeniería Biomédica · UNITEC · {etiqueta_periodo}",
-                    kpis=kpis_pdf, figuras=figuras_pdf)
+        with cpdf1:
+            if st.button("📄 PDF global de práctica", key="gen_pdf_dash",
+                         use_container_width=True):
+                with st.spinner("Generando PDF..."):
+                    kpis_pdf, figuras_pdf = construir_bloque_indicadores(
+                        fdf, fdf_act, etiqueta_periodo, horas_acum, horas_tot)
+                    pdf_bytes = construir_pdf(
+                        titulo="BitaLogs - Reporte de Indicadores",
+                        subtitulo=f"Ingeniería Biomédica · {etiqueta_periodo}",
+                        kpis=kpis_pdf, figuras=figuras_pdf)
+                st.download_button(
+                    "📥 Descargar PDF", data=pdf_bytes,
+                    file_name=f"BitaLogs_{etiqueta_periodo.replace(' ', '_')}.pdf",
+                    mime="application/pdf", key="dl_pdf_dash",
+                    use_container_width=True)
 
-            st.download_button(
-                "📥 Descargar PDF", data=pdf_bytes,
-                file_name=f"BitaLogs_Reporte_{etiqueta_periodo.replace(' ', '_')}.pdf",
-                mime="application/pdf", key="dl_pdf_dash")
+        with cpdf2:
+            if st.button("📚 PDF semana 1-10", key="gen_pdf_multi",
+                         use_container_width=True):
+                with st.spinner("Generando PDF de todas las semanas..."):
+                    df_full = _prep(load_atenciones())
+                    df_act_full = load_actividades_extra()
+                    df_act_full["_fecha"] = pd.to_datetime(
+                        df_act_full.get("fecha"), errors="coerce")
+                    bloques = []
+                    for s in cal.lista_semanas():
+                        sub = df_full[df_full["semana"] == s] if not df_full.empty else df_full
+                        sub_act = (df_act_full[df_act_full["semana"] == s]
+                                   if not df_act_full.empty else df_act_full)
+                        if sub.empty and sub_act.empty:
+                            continue  # saltar semanas sin nada registrado
+                        h_acum = cal.horas_hasta(cal.viernes_de_semana(s))
+                        kpis_s, figs_s = construir_bloque_indicadores(
+                            sub, sub_act, f"Semana {s}", h_acum, horas_tot)
+                        bloques.append({
+                            "subtitulo": f"Ingeniería Biomédica · Semana {s}",
+                            "kpis": kpis_s, "figuras": figs_s})
+
+                    if not bloques:
+                        st.warning("No hay datos registrados en ninguna semana.")
+                    else:
+                        pdf_multi = construir_pdf_multi(
+                            "BitaLogs - Reporte Semanal", bloques)
+                        st.download_button(
+                            "📥 Descargar PDF (10 semanas)", data=pdf_multi,
+                            file_name="BitaLogs_Reporte_Semanas_1-10.pdf",
+                            mime="application/pdf", key="dl_pdf_multi",
+                            use_container_width=True)
 
         # ---- Exportar ----
         st.divider()
