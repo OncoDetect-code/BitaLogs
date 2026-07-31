@@ -34,6 +34,7 @@ from sqlalchemy import create_engine, text
 import calendario as cal
 from importar_bitacora import leer_matriz
 from formato_bitacora import bitacora_html
+from matriz_excel import matriz_xlsx_bytes
 from reporte_pdf import construir_pdf, construir_pdf_multi
 from splash import mostrar_splash
 
@@ -1544,13 +1545,28 @@ with tab_bitacora:
         html = bitacora_html(registros, titulo=titulo)
 
         st.components.v1.html(html, height=650, scrolling=True)
-        st.download_button(
-            "⬇️ Descargar bitácora (HTML para imprimir)",
-            data=html.encode("utf-8"),
-            file_name=f"{titulo.replace(' ', '_').replace('—','-')}.html",
-            mime="text/html")
-        st.caption("Consejo: abrir el HTML descargado y usar Ctrl+P, opcion "
-                   "'Guardar como PDF', para una copia en PDF.")
+
+        # Registros para el Excel: se respeta el filtro de la TABLA (dff),
+        # con toda la informacion (el Excel no lleva fotos).
+        registros_xlsx = dff.to_dict("records")
+        dl1, dl2 = st.columns(2)
+        with dl1:
+            st.download_button(
+                "⬇️ Descargar bitácora (HTML para imprimir)",
+                data=html.encode("utf-8"),
+                file_name=f"{titulo.replace(' ', '_').replace('—','-')}.html",
+                mime="text/html", use_container_width=True)
+        with dl2:
+            st.download_button(
+                "⬇️ Descargar Excel (Matriz de impacto)",
+                data=matriz_xlsx_bytes(registros_xlsx, titulo=titulo),
+                file_name=f"{titulo.replace(' ', '_').replace('—','-')}.xlsx",
+                mime=("application/vnd.openxmlformats-officedocument."
+                      "spreadsheetml.sheet"),
+                use_container_width=True)
+        st.caption("El HTML incluye la evidencia fotográfica; el Excel replica "
+                   "el formato oficial de la Matriz de impacto solo con la "
+                   "información de la tabla.")
 
 
 # =============================================================== TAB: Comentarios
