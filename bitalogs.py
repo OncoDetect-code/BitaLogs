@@ -1139,12 +1139,29 @@ with tab_dash:
             fig_dist = px.bar(dist, x="Horas", y="Tipo de actividad",
                               orientation="h", text="Horas",
                               color="Tipo de actividad",
-                              color_discrete_sequence=PALETA_ACTIVIDADES,
-                              title="Horas invertidas por tipo de actividad")
-            fig_dist.update_traces(texttemplate="%{text:.1f} h",
-                                   textposition="outside")
-            fig_dist.update_layout(yaxis_title="", xaxis_title="Horas",
-                                   showlegend=False)
+                              color_discrete_sequence=PALETA_ACTIVIDADES)
+            # En pantallas angostas (móvil) las etiquetas largas del eje Y
+            # aplastan las barras. Se ocultan las etiquetas del eje y en su
+            # lugar el nombre de cada actividad va COMO título encima de su
+            # barra, alineado a la izquierda, para que la barra use todo el
+            # ancho disponible. Las horas quedan al final de cada barra.
+            fig_dist.update_traces(
+                texttemplate="%{text:.1f} h", textposition="outside",
+                cliponaxis=False)
+            for _, fila_d in dist.iterrows():
+                fig_dist.add_annotation(
+                    x=0, y=fila_d["Tipo de actividad"],
+                    text=f"<b>{fila_d['Tipo de actividad']}</b>",
+                    showarrow=False, xanchor="left", yanchor="bottom",
+                    yshift=10, xshift=-2,
+                    font=dict(size=12, color="#333333"))
+            fig_dist.update_layout(
+                yaxis=dict(showticklabels=False, title=""),
+                xaxis=dict(title="Horas"),
+                showlegend=False,
+                margin=dict(l=8, r=40, t=10, b=40),
+                bargap=0.45,
+                uniformtext=dict(mode="hide", minsize=10))
             st.plotly_chart(fig_dist, use_container_width=True)
             dk1, dk2, dk3 = st.columns(3)
             dk1.metric("Horas mantenimiento", f"{horas_mant:.1f} h")
