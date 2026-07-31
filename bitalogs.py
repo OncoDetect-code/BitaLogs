@@ -1,5 +1,5 @@
 """
-BitaLogs — Dashboard de rendimiento de práctica profesional.
+BitaLogs - Dashboard de rendimiento de práctica profesional.
 Ingeniería Biomédica · UNITEC · Autor: Luis
 
 Basado en la estructura de ServiDox, adaptado para medir el rendimiento
@@ -896,9 +896,9 @@ with tab_input:
                 "id": "ID", "fecha": "Fecha", "semana": "Semana", "dia": "Día",
                 "tipo_actividad": "Actividad", "descripcion": "Descripción",
                 "horas": "Horas"})
-            st.caption("Edita cualquier celda y presiona 'Guardar cambios'. "
-                       "Para borrar una fila, selecciónala con el check de la "
-                       "izquierda y presiona la papelera. Si escribes en "
+            st.caption("Editar cualquier celda y presionar 'Guardar cambios'. "
+                       "Para borrar una fila, seleccionarla con el check de la "
+                       "izquierda y presionar la papelera. Si se escribe en "
                        "'Actividad' un nombre igual a uno ya existente (aunque "
                        "cambien mayúsculas o espacios), se fusiona con ese y "
                        "las horas se suman en el mismo grupo del gráfico.")
@@ -926,7 +926,7 @@ with tab_input:
 # =============================================================== TAB: Cargar bitácora
 with tab_carga:
     st.subheader("Cargar bitácora institucional (Matriz de impacto)")
-    st.caption("Sube tu Excel de la Matriz de impacto (UNITEC). BitaLogs "
+    st.caption("Permite subir un Excel de la Matriz de impacto (UNITEC). BitaLogs "
                "detecta semana, día, equipo, problema, solución, ¿resuelto?, "
                "impacto y observaciones. Luego asignas fecha, horas, área y "
                "tipo antes de guardar.")
@@ -1012,8 +1012,8 @@ with tab_carga:
 with tab_dash:
     df = _prep(load_atenciones())
     if df.empty:
-        st.info("Aún no hay atenciones. Regístralas en '➕ Nuevo registro' "
-                "o carga tu bitácora en '📥 Cargar bitácora'.")
+        st.info("Aún no hay atenciones. Se registran en '➕ Nuevo registro' "
+                "o se carga una bitácora en '📥 Cargar bitácora'.")
     else:
         with st.sidebar:
             st.header("Filtros")
@@ -1061,10 +1061,10 @@ with tab_dash:
                   help="Total de atenciones según los filtros.")
         k2.metric("Equipos únicos", equipos_unicos)
         k3.metric("Prom. atención",
-                  f"{dur_prom:.0f} min" if pd.notna(dur_prom) else "—",
+                  f"{dur_prom:.0f} min" if pd.notna(dur_prom) else "-",
                   help="Duración promedio por atención (inicio→fin).")
         k4.metric("Equipos por día",
-                  f"{eq_por_dia:.1f}" if dias_activos else "—",
+                  f"{eq_por_dia:.1f}" if dias_activos else "-",
                   help="Promedio de equipos atendidos por día con actividad.")
 
         # ---- Horas acumuladas ----
@@ -1220,7 +1220,7 @@ with tab_dash:
         else:
             etiqueta_periodo = "Toda la práctica"
 
-        st.subheader(f"📄 Reporte PDF — {etiqueta_periodo}")
+        st.subheader(f"📄 Reporte PDF: {etiqueta_periodo}")
 
         cpdf1, cpdf2 = st.columns(2)
 
@@ -1294,9 +1294,9 @@ with tab_dash:
 with tab_datos:
     df = load_atenciones()
     st.subheader("Todas las atenciones")
-    st.caption("Edita cualquier celda, incluidas Semana y Día (por si cargaste "
-               "un registro con retraso y quedó en el día equivocado). La "
-               "duración se recalcula de las horas. Usa la papelera para borrar filas.")
+    st.caption("Se puede editar cualquier celda, incluidas Semana y Día (por si un "
+               "registro se cargó con retraso y quedó en el día equivocado). La "
+               "duración se recalcula de las horas. La papelera borra filas.")
 
     if df.empty:
         st.info("Sin datos todavía.")
@@ -1344,7 +1344,7 @@ with tab_datos:
 
         st.divider()
         st.subheader("📷 Agregar o cambiar fotos de un registro")
-        st.caption("Selecciona un registro (incluidos los antiguos) y súbele "
+        st.caption("Selecciona un registro (incluidos los antiguos) para agregarle "
                    "hasta 4 fotos. Reemplaza las que tenga.")
         df_ord = df.sort_values("n")
         etqs_img = [f"N° {int(r['n'])}  |  {r['fecha']}  |  S{r['semana']}D{r['dia']}"
@@ -1352,9 +1352,9 @@ with tab_datos:
                     for _, r in df_ord.iterrows()]
         # Mapa etiqueta -> id real de la base
         _map_img = {e: int(r["id"]) for e, (_, r) in zip(etqs_img, df_ord.iterrows())}
-        sel_img = st.selectbox("Registro", ["— Selecciona —"] + etqs_img,
+        sel_img = st.selectbox("Registro", ["- Selecciona -"] + etqs_img,
                                key="sel_reg_img")
-        if sel_img != "— Selecciona —":
+        if sel_img != "- Selecciona -":
             id_img = _map_img[sel_img]
             actuales = imagenes_de(id_img)
             if actuales:
@@ -1396,7 +1396,7 @@ with tab_datos:
                 st.write("Este registro **no tiene fotos** todavía.")
 
             nuevas = st.file_uploader(
-                "Nuevas fotos (hasta 4 JPEG) — reemplazan las actuales",
+                "Nuevas fotos (hasta 4 JPEG), reemplazan las actuales",
                 type=["jpg", "jpeg", "png"], accept_multiple_files=True,
                 key=f"up_edit_{id_img}")
             colb1, colb2 = st.columns([1, 1])
@@ -1431,9 +1431,9 @@ with tab_datos:
                 for _, r in df_del.iterrows()]
         _map_del = {e: (int(r["id"]), int(r["n"]))
                     for e, (_, r) in zip(etqs, df_del.iterrows())}
-        sel = st.selectbox("Atención a eliminar", ["— Selecciona —"] + etqs,
+        sel = st.selectbox("Atención a eliminar", ["- Selecciona -"] + etqs,
                            key="del_at")
-        if sel != "— Selecciona —":
+        if sel != "- Selecciona -":
             id_del, n_del = _map_del[sel]
             if st.checkbox(f"Confirmo eliminar la atención N° {n_del}",
                            key="cf_del"):
@@ -1445,10 +1445,10 @@ with tab_datos:
 
 # =============================================================== TAB: Mostrar Bitácoras
 with tab_bitacora:
-    st.subheader("📄 Mostrar Bitácoras — Matriz de Impacto")
+    st.subheader("📄 Mostrar Bitácoras: Matriz de Impacto")
     st.caption("Genera la bitácora con el formato institucional a partir de "
-               "tus registros. Filtra la tabla y la evidencia fotográfica por "
-               "semana o día, y usa el botón Imprimir para guardar como PDF.")
+               "los registros. Permite filtrar la tabla y la evidencia "
+               "fotográfica por semana o día antes de descargar el HTML.")
 
     df_b = load_atenciones()
     if df_b.empty:
@@ -1498,13 +1498,13 @@ with tab_bitacora:
 
         # ---- Aplicar filtro de la tabla ----
         dff = df_b.copy()
-        titulo = "Matriz de Impacto — Toda la práctica"
+        titulo = "Matriz de Impacto - Toda la práctica"
         if modo == "Semana" and sem_sel:
             dff = dff[dff["semana"] == sem_sel]
-            titulo = f"Matriz de Impacto — Semana {sem_sel}"
+            titulo = f"Matriz de Impacto - Semana {sem_sel}"
         elif modo == "Día" and sem_sel and dia_sel:
             dff = dff[(dff["semana"] == sem_sel) & (dff["dia"] == dia_sel)]
-            titulo = f"Matriz de Impacto — Semana {sem_sel}, Día {dia_sel}"
+            titulo = f"Matriz de Impacto - Semana {sem_sel}, Día {dia_sel}"
 
         dff = dff.sort_values(["semana", "dia", "id"], na_position="last")
 
@@ -1549,14 +1549,14 @@ with tab_bitacora:
             data=html.encode("utf-8"),
             file_name=f"{titulo.replace(' ', '_').replace('—','-')}.html",
             mime="text/html")
-        st.caption("Consejo: abre el HTML descargado y usa Ctrl+P → "
-                   "'Guardar como PDF' para una copia en PDF.")
+        st.caption("Consejo: abrir el HTML descargado y usar Ctrl+P, opcion "
+                   "'Guardar como PDF', para una copia en PDF.")
 
 
 # =============================================================== TAB: Comentarios
 with tab_coment:
     st.subheader("💬 Comentarios semanales de evaluadores")
-    st.caption("Tus evaluadores pueden dejar un comentario por semana. "
+    st.caption("Los evaluadores pueden dejar un comentario por semana. "
                "Cada comentario queda firmado con su nombre y fecha.")
 
     with st.form("nuevo_coment", clear_on_submit=True):

@@ -2,31 +2,49 @@
 Generador del formato oficial "Matriz de Impacto" (UNITEC) para BitaLogs.
 
 Replica la estructura del Excel institucional:
-  - Encabezado: FACULTAD DE INGENIERÍA / INGENIERÍA BIOMÉDICA
+  - Encabezado: logo UNITEC centrado + FACULTAD DE INGENIERIA /
+    INGENIERIA BIOMEDICA.
   - Tabla de 7 columnas: Semana | Equipo o proceso | Problema identificado |
-    Solución sugerida | ¿Problema ya resuelto? | Impacto esperado o
-    beneficio real | Observaciones
-  - Debajo de cada registro (o al final), la evidencia fotográfica,
-    distribuida y centrada según cuántas imágenes haya (1 a 4).
+    Solucion sugerida | Problema ya resuelto? | Impacto esperado o
+    beneficio real | Observaciones.
+  - Al final, la evidencia fotografica, distribuida y centrada segun
+    cuantas imagenes haya (1 a 4).
+
+El documento usa la tipografia Poppins (tamano base 8) y esta pensado
+para descargarse e imprimirse tal cual como evidencia institucional.
 
 Expone:
-    bitacora_html(registros, titulo) -> str   (vista previa / imprimir)
+    bitacora_html(registros, titulo) -> str
 
 `registros` es una lista de dicts con las claves internas de BitaLogs:
     semana, dia, fecha, area, equipo, problema, solucion, resuelto,
     impacto, observaciones, img1..img4
 """
 
+import os
 from html import escape
 
 # Paleta institucional sobria
 _AZUL = "#1F4E78"
 _GRIS_ENC = "#D9E1F2"
 
+# Fuente Poppins servida desde Google Fonts (con respaldo a sans-serif).
+_POPPINS_LINK = ("https://fonts.googleapis.com/css2?"
+                 "family=Poppins:wght@400;600;700&display=swap")
 
-# Valores que, venidos de un DataFrame, significan "vacío" pero llegan
+# Logo UNITEC embebido como data-URI (para que el HTML sea autocontenido
+# y el logo se vea aunque el archivo se abra sin conexion).
+_LOGO_PATH = os.path.join(os.path.dirname(__file__), "logo_b64.txt")
+try:
+    with open(_LOGO_PATH, "r", encoding="utf-8") as _f:
+        _LOGO_DATA = _f.read().strip()
+except Exception:
+    _LOGO_DATA = ""
+
+
+# Valores que, venidos de un DataFrame, significan "vacio" pero llegan
 # como texto ("None", "nan") o como float NaN. Sin filtrarlos, un slot
-# de imagen vacío producía <img src="nan"> = el ícono roto.
+# de imagen vacio producia <img src="nan"> = el icono roto.
 _VACIOS = {"", "none", "nan", "null", "<na>"}
 
 
@@ -34,7 +52,6 @@ def _es_vacio(v):
     if v is None:
         return True
     try:
-        # float('nan') != float('nan'): así detectamos NaN de pandas
         if isinstance(v, float) and v != v:
             return True
     except Exception:
@@ -50,9 +67,8 @@ def _v(rep, key, default=""):
 def _imgs_de(rep):
     """
     Lista de data-URIs REALES presentes (1 a 4) en el registro, en el
-    orden img1→img4. Se ignoran los slots vacíos (None, NaN, "None",
-    "nan", cadenas en blanco) y también cualquier valor que no sea un
-    data-URI de imagen, para no renderizar nunca un <img> roto.
+    orden img1 a img4. Se ignoran los slots vacios y cualquier valor que
+    no sea un data-URI de imagen, para no renderizar nunca un <img> roto.
     """
     out = []
     for k in ("img1", "img2", "img3", "img4"):
@@ -67,31 +83,21 @@ def _imgs_de(rep):
 
 def _bloque_imagenes(imgs):
     """
-    Devuelve el HTML de la evidencia fotográfica, centrada y bien
-    distribuida según la cantidad:
-      1  -> una grande centrada
-      2  -> dos lado a lado
-      3  -> tres en fila
-      4  -> grilla 2x2
-    Siempre centrado y aprovechando el ancho disponible.
+    HTML de la evidencia fotografica, centrada y distribuida segun la
+    cantidad: 1 grande, 2 lado a lado, 3 en fila, 4 en grilla 2x2.
     """
     n = len(imgs)
     if n == 0:
         return ""
 
-    # Ancho de cada celda según cantidad (para aprovechar el espacio)
     if n == 1:
-        col_w = "70%"
-        cols = 1
+        col_w = "60%"
     elif n == 2:
-        col_w = "48%"
-        cols = 2
+        col_w = "46%"
     elif n == 3:
-        col_w = "32%"
-        cols = 3
-    else:  # 4
-        col_w = "48%"
-        cols = 2
+        col_w = "31%"
+    else:
+        col_w = "46%"
 
     celdas = ""
     for src in imgs:
@@ -100,23 +106,18 @@ def _bloque_imagenes(imgs):
             f'<img src="{src}" alt="" onerror="this.style.display=\'none\'"/></div>'
         )
 
-    return f"""
-    <div class="evidencia">
-      <div class="evidencia-tit">EVIDENCIA FOTOGRÁFICA</div>
-      <div class="img-grid">{celdas}</div>
-    </div>
-    """
+    return f'<div class="img-grid">{celdas}</div>'
 
 
 def bitacora_html(registros, titulo="Matriz de Impacto"):
-    """HTML completo de la bitácora en formato UNITEC, con botón imprimir."""
+    """HTML acotado de la bitacora en formato UNITEC, listo para descargar."""
     filas = ""
     bloques_img = ""
 
     for rep in registros:
         sem = _v(rep, "semana")
         dia = _v(rep, "dia")
-        etiqueta_sem = f"Semana {sem}" + (f" · Día {dia}" if dia else "")
+        etiqueta_sem = f"Semana {sem}" + (f" - Dia {dia}" if dia else "")
         filas += (
             "<tr>"
             f"<td class='c sem'>{escape(etiqueta_sem)}</td>"
@@ -128,66 +129,62 @@ def bitacora_html(registros, titulo="Matriz de Impacto"):
             f"<td>{escape(_v(rep,'observaciones'))}</td>"
             "</tr>"
         )
-        # Evidencia por registro (si tiene imágenes)
         imgs = _imgs_de(rep)
         if imgs:
             enc = escape(_v(rep, "equipo")) or "Registro"
             bloques_img += (
                 f"<div class='reg-evidencia'>"
-                f"<div class='reg-tit'>{escape(etiqueta_sem)} — {enc}</div>"
+                f"<div class='reg-tit'>{escape(etiqueta_sem)}: {enc}</div>"
                 f"{_bloque_imagenes(imgs)}</div>"
             )
+
+    logo_html = (f'<img class="logo" src="{_LOGO_DATA}" alt="UNITEC"/>'
+                 if _LOGO_DATA else "")
 
     return f"""<!DOCTYPE html>
 <html lang="es"><head><meta charset="utf-8">
 <title>{escape(titulo)}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="{_POPPINS_LINK}" rel="stylesheet">
 <style>
-  @page {{ size: landscape; margin: 12mm; }}
+  @page {{ size: landscape; margin: 10mm; }}
   * {{ box-sizing: border-box; }}
-  body {{ font-family: Arial, Helvetica, sans-serif; font-size: 10px;
-         color: #000; background: #fff; margin: 0; padding: 10px; }}
+  body {{ font-family: 'Poppins', Arial, sans-serif; font-size: 8px;
+         color: #000; background: #fff; margin: 0; padding: 8px; }}
   .doc {{ max-width: 1050px; margin: 0 auto; }}
   .enc {{ text-align: center; margin-bottom: 8px; }}
-  .enc .fac {{ font-weight: bold; font-size: 12px; letter-spacing: .5px; }}
-  .enc .car {{ font-weight: bold; font-size: 11px; color: {_AZUL}; }}
-  .enc .sub {{ font-size: 10px; color: #444; margin-top: 2px; }}
+  .enc .logo {{ height: 46px; width: auto; margin-bottom: 4px; }}
+  .enc .fac {{ font-weight: 700; font-size: 10px; letter-spacing: .3px; }}
+  .enc .car {{ font-weight: 600; font-size: 9px; color: {_AZUL}; }}
+  .enc .sub {{ font-size: 8px; color: #444; margin-top: 2px; }}
   table {{ width: 100%; border-collapse: collapse; margin-top: 6px; }}
-  th, td {{ border: 1px solid #444; padding: 4px 6px; vertical-align: top;
-           text-align: left; }}
-  th {{ background: {_GRIS_ENC}; color: #1a1a1a; font-size: 9.5px;
-       text-align: center; font-weight: bold; }}
+  th, td {{ border: 1px solid #444; padding: 3px 5px; vertical-align: top;
+           text-align: left; font-size: 8px; }}
+  th {{ background: {_GRIS_ENC}; color: #1a1a1a; text-align: center;
+       font-weight: 600; }}
   .c {{ text-align: center; }}
-  .sem {{ font-weight: bold; white-space: nowrap; color: {_AZUL}; }}
-  /* Evidencia fotográfica */
-  .reg-evidencia {{ margin-top: 14px; page-break-inside: avoid; }}
-  .reg-tit {{ font-weight: bold; font-size: 10px; color: {_AZUL};
-             border-left: 3px solid {_AZUL}; padding-left: 6px; margin-bottom: 4px; }}
-  .evidencia-tit {{ font-size: 8.5px; letter-spacing: .5px; color: #666;
-                   text-align: center; margin-bottom: 4px; }}
-  .img-grid {{ display: flex; flex-wrap: wrap; gap: 8px;
+  .sem {{ font-weight: 600; white-space: nowrap; color: {_AZUL}; }}
+  .reg-evidencia {{ margin-top: 10px; page-break-inside: avoid; }}
+  .reg-tit {{ font-weight: 600; font-size: 8px; color: {_AZUL};
+             border-left: 3px solid {_AZUL}; padding-left: 5px;
+             margin-bottom: 3px; }}
+  .img-grid {{ display: flex; flex-wrap: wrap; gap: 6px;
               justify-content: center; align-items: flex-start; }}
   .img-cell {{ display: flex; justify-content: center; }}
-  .img-cell img {{ width: 100%; height: auto; max-height: 260px;
-                  object-fit: contain; border: 1px solid #bbb; border-radius: 3px;
-                  display: block; }}
-  .seccion-fotos {{ margin-top: 18px; }}
-  .seccion-fotos > h3 {{ font-size: 11px; color: {_AZUL};
-                        border-bottom: 1px solid {_AZUL}; padding-bottom: 3px; }}
-  /* Botón imprimir */
-  .noprint {{ text-align: center; margin: 8px 0 14px; }}
-  .btn {{ background: {_AZUL}; color: #fff; border: 0; padding: 9px 22px;
-         font-size: 13px; border-radius: 4px; cursor: pointer; }}
-  @media print {{
-    body {{ padding: 0; }}
-    .noprint {{ display: none !important; }}
-  }}
+  .img-cell img {{ width: 100%; height: auto; max-height: 230px;
+                  object-fit: contain; border: 1px solid #bbb;
+                  border-radius: 2px; display: block; }}
+  .seccion-fotos {{ margin-top: 14px; }}
+  .seccion-fotos > h3 {{ font-size: 9px; color: {_AZUL}; font-weight: 600;
+                        border-bottom: 1px solid {_AZUL}; padding-bottom: 2px; }}
 </style></head><body>
-<div class="noprint"><button class="btn" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button></div>
 <div class="doc">
 
   <div class="enc">
-    <div class="fac">FACULTAD DE INGENIERÍA</div>
-    <div class="car">INGENIERÍA BIOMÉDICA</div>
+    {logo_html}
+    <div class="fac">FACULTAD DE INGENIERIA</div>
+    <div class="car">INGENIERIA BIOMEDICA</div>
     <div class="sub">{escape(titulo)}</div>
   </div>
 
@@ -197,8 +194,8 @@ def bitacora_html(registros, titulo="Matriz de Impacto"):
         <th style="width:10%">Semana</th>
         <th style="width:15%">Equipo o proceso</th>
         <th style="width:19%">Problema identificado</th>
-        <th style="width:18%">Solución sugerida</th>
-        <th style="width:8%">¿Problema ya resuelto?</th>
+        <th style="width:18%">Solucion sugerida</th>
+        <th style="width:8%">Problema ya resuelto?</th>
         <th style="width:18%">Impacto esperado o beneficio real</th>
         <th style="width:12%">Observaciones</th>
       </tr>
@@ -208,6 +205,6 @@ def bitacora_html(registros, titulo="Matriz de Impacto"):
     </tbody>
   </table>
 
-  {f'<div class="seccion-fotos"><h3>Evidencia fotográfica</h3>{bloques_img}</div>' if bloques_img else ''}
+  {f'<div class="seccion-fotos"><h3>Evidencia fotografica</h3>{bloques_img}</div>' if bloques_img else ''}
 
 </div></body></html>"""
