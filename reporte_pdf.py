@@ -89,12 +89,17 @@ def _figura_limpia(fig, con_leyenda_abajo=True):
                                     font=dict(size=22)))
     for i, tr in enumerate(f.data):
         if tr.type == "pie":
-            tr.marker.colors = _PALETA
+            # Paleta pie con máximo contraste entre porciones vecinas y
+            # colores vivos (como el dashboard): azul, ámbar, verde,
+            # violeta, rosa, teal.
+            tr.marker.colors = ["#2563EB", "#F59E0B", "#16A34A",
+                                "#7C3AED", "#EF4444", "#0EA5A5",
+                                "#DB2777", "#0891B2"]
             tr.textfont = dict(color="white", size=30, family="Arial Black")
             tr.textposition = "inside"
             tr.textinfo = "percent"
             tr.insidetextorientation = "horizontal"
-            tr.marker.line = dict(color="white", width=3)
+            tr.marker.line = dict(color="white", width=4)
         elif tr.type == "bar":
             if tr.marker.color is None or isinstance(tr.marker.color, str):
                 tr.marker.color = _PALETA[i % len(_PALETA)]
@@ -106,18 +111,22 @@ def _figura_limpia(fig, con_leyenda_abajo=True):
                 pass
 
     if barras_h:
+        # Con color por categoría, Plotly crea una traza por categoría
+        # (cada una con un solo valor en y). Hay que recolectar y de
+        # TODAS las trazas, no solo la primera, o solo se anota una barra.
         cats = []
         for tr in f.data:
             if tr.type == "bar" and getattr(tr, "orientation", None) == "h":
-                cats = list(tr.y)
-                break
+                for yv in (tr.y or []):
+                    if yv not in cats:
+                        cats.append(yv)
         f.update_yaxes(showticklabels=False, title="")
-        f.update_layout(bargap=0.55, margin=dict(l=55, r=35, t=40, b=55))
+        f.update_layout(bargap=0.68, margin=dict(l=55, r=45, t=45, b=55))
         for cat in cats:
             f.add_annotation(x=0, y=cat, text="<b>%s</b>" % cat,
                              showarrow=False, xanchor="left", yanchor="bottom",
-                             yshift=18, xshift=-2,
-                             font=dict(size=21, color="#1B2436"))
+                             yshift=24, xshift=-2,
+                             font=dict(size=20, color="#1B2436"))
     return f
 
 
@@ -166,20 +175,24 @@ def _hero(pdf, titulo, subtitulo):
 
     # Texto identidad
     pdf.set_xy(x + 27, y + 7)
-    pdf.set_font("Helvetica", "B", 15)
+    pdf.set_font("Helvetica", "B", 14)
     pdf.set_text_color(*_BLANCO)
-    pdf.cell(0, 7, "BitaLogs - Panel de Rendimiento", new_x="LMARGIN",
-             new_y="NEXT")
+    pdf.cell(w * 0.58 - 27, 7, "BitaLogs - Panel de Rendimiento",
+             new_x="LMARGIN", new_y="NEXT")
     pdf.set_x(x + 27)
     pdf.set_font("Helvetica", "", 9)
-    pdf.cell(0, 5, _sanear("%s  ·  Cuenta %s  ·  %s"
-                           % (ESTUDIANTE, CUENTA, CARRERA)))
+    pdf.cell(w * 0.58 - 27, 5, _sanear("%s  ·  Cuenta %s  ·  %s"
+                                       % (ESTUDIANTE, CUENTA, CARRERA)))
 
-    # Subtítulo del periodo (derecha)
-    pdf.set_xy(x + w * 0.62, y + 9)
-    pdf.set_font("Helvetica", "B", 11)
+    # Subtítulo del periodo (derecha): solo "Toda la práctica" o "Semana N"
+    periodo = subtitulo
+    for pref in ("Ingeniería Biomédica · ", "Ingeniería Biomédica - ",
+                 "Ingenieria Biomedica - ", "Ingenieria Biomedica · "):
+        periodo = periodo.replace(pref, "")
+    pdf.set_xy(x + w * 0.62, y + 11)
+    pdf.set_font("Helvetica", "B", 12)
     pdf.set_text_color(*_BLANCO)
-    pdf.cell(w * 0.36 - 4, 6, _sanear(subtitulo), align="R")
+    pdf.cell(w * 0.36 - 4, 7, _sanear(periodo), align="R")
 
     pdf.set_y(y + h + 6)
 

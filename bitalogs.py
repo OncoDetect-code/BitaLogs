@@ -1257,7 +1257,7 @@ with tab_dash:
                         fdf, fdf_act, etiqueta_periodo, horas_acum, horas_tot)
                     pdf_bytes = construir_pdf(
                         titulo="BitaLogs - Reporte de Indicadores",
-                        subtitulo=f"Ingeniería Biomédica · {etiqueta_periodo}",
+                        subtitulo=etiqueta_periodo,
                         kpis=kpis_pdf, figuras=figuras_pdf)
                 st.download_button(
                     "📥 Descargar PDF", data=pdf_bytes,
@@ -1284,7 +1284,7 @@ with tab_dash:
                         kpis_s, figs_s = construir_bloque_indicadores(
                             sub, sub_act, f"Semana {s}", h_acum, horas_tot)
                         bloques.append({
-                            "subtitulo": f"Ingeniería Biomédica · Semana {s}",
+                            "subtitulo": f"Semana {s}",
                             "kpis": kpis_s, "figuras": figs_s})
 
                     if not bloques:
