@@ -1,52 +1,55 @@
 """
-reporte_pdf.py — PDF de indicadores de BitaLogs con diseño tipo
-*dashboard*: cabecera institucional con identificación del estudiante,
-fila de tarjetas KPI de color, y gráficos distribuidos en grilla que
-aprovecha toda la página.
+reporte_pdf.py — Reporte de indicadores de BitaLogs en PDF, con la
+identidad visual de la app (marca BitaLogs):
+
+  - Cabecera con hero azul degradado, logo de BitaLogs e identidad del
+    estudiante.
+  - Fila de tarjetas KPI con acento de color.
+  - Gráficos distribuidos en grilla, con paleta viva y sin superposición.
 
 Expone:
     construir_pdf(titulo, subtitulo, kpis, figuras) -> bytes
     construir_pdf_multi(titulo, bloques) -> bytes
-
-Identidad del estudiante fija (cabecera de cada página):
-    ESTUDIANTE, CUENTA, CARRERA
 """
 
 from io import BytesIO
 import copy
+import os
 
 from fpdf import FPDF
 from PIL import Image
 
-# --- Identidad institucional (se muestra en la cabecera) ---
+# ---- Identidad ----
 ESTUDIANTE = "Luis Velásquez"
 CUENTA = "21941285"
 CARRERA = "Ingeniería Biomédica"
 
-_AZUL = (31, 78, 120)
-_AZUL_CL = (46, 116, 181)
-_GRIS_TXT = (90, 90, 90)
+# ---- Paleta de marca (coincide con el dashboard) ----
+_AZUL = (37, 99, 235)       # #2563EB
+_AZUL_CL = (96, 165, 250)   # #60A5FA
+_INK = (27, 36, 54)         # #1B2436
+_MUTED = (107, 120, 144)    # #6B7890
 _BLANCO = (255, 255, 255)
+_GRIS_BG = (238, 241, 246)  # #EEF1F6
 
-# Colores de las tarjetas KPI (ciclo).
-_KPI_COLORES = [(31, 78, 120), (39, 122, 90), (176, 58, 46),
-                (124, 74, 158), (200, 128, 20)]
+_KPI_ACENTOS = [(37, 99, 235), (14, 165, 165), (239, 68, 68),
+                (124, 58, 237), (245, 158, 11)]
 
-# Paleta forzada sobre cada figura (evita gráficos sin color).
-_PALETA = ["#1F4E78", "#2E8B57", "#C0392B", "#8E44AD", "#D68910",
-           "#16A085", "#2874A6", "#CA6F1E"]
+_PALETA = ["#2563EB", "#0EA5A5", "#7C3AED", "#F59E0B", "#EF4444",
+           "#16A34A", "#0891B2", "#DB2777"]
+
+_LOGO_PATH = os.path.join(os.path.dirname(__file__), "logo_bitalogs.png")
+
+_MX = 12
+_ANCHO = 210 - 2 * _MX
 
 _REEMPLAZOS = {
     "—": "-", "–": "-", "…": "...", "'": "'", "'": "'",
     "\u201c": '"', "\u201d": '"', "•": "-", "·": "-",
 }
 
-# Márgenes de trabajo
-_MX = 12          # margen izquierdo/derecho
-_ANCHO = 210 - 2 * _MX
 
-
-def _sanear(texto: str) -> str:
+def _sanear(texto):
     if not texto:
         return ""
     t = str(texto)
@@ -55,46 +58,70 @@ def _sanear(texto: str) -> str:
     return t.encode("latin-1", "ignore").decode("latin-1").strip()
 
 
+def _hex_rgb(h):
+    h = h.lstrip("#")
+    return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+
+
 def _figura_limpia(fig, con_leyenda_abajo=True):
-    """
-    Copia la figura y le aplica una plantilla clara, colores forzados y
-    -clave para no encimar títulos- mueve la leyenda ABAJO en horizontal
-    y quita el título interno del gráfico (el título lo pone el PDF).
-    """
+    """Aplica el look de marca a una figura Plotly antes de exportarla."""
     f = copy.deepcopy(fig)
     tiene_pie = any(t.type == "pie" for t in f.data)
-    # La leyenda solo aporta en los pie/dona. En barras, las etiquetas
-    # de los ejes ya identifican cada categoría, así que la leyenda
-    # sería redundante y robaría espacio: se oculta.
+    barras_h = any(getattr(t, "orientation", None) == "h"
+                   for t in f.data if t.type == "bar")
     mostrar_leyenda = tiene_pie and con_leyenda_abajo
+
     f.update_layout(
         template="plotly_white",
         paper_bgcolor="white", plot_bgcolor="white",
-        font=dict(color="#333333", size=15),
+        font=dict(color="#1B2436", size=24, family="Arial"),
         title=None,
         showlegend=mostrar_leyenda,
-        margin=dict(l=55, r=25, t=15,
-                    b=70 if mostrar_leyenda else 45),
+        margin=dict(l=55, r=35, t=15, b=95 if mostrar_leyenda else 55),
     )
+    f.update_xaxes(title_font=dict(size=23), tickfont=dict(size=20),
+                   gridcolor="#EEF1F6")
+    f.update_yaxes(title_font=dict(size=23), tickfont=dict(size=20),
+                   gridcolor="#EEF1F6")
     if mostrar_leyenda:
-        f.update_layout(legend=dict(
-            orientation="h", yanchor="top", y=-0.05,
-            xanchor="center", x=0.5, font=dict(size=11)))
+        f.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.06,
+                                    xanchor="center", x=0.5,
+                                    font=dict(size=22)))
     for i, tr in enumerate(f.data):
         if tr.type == "pie":
             tr.marker.colors = _PALETA
-            tr.textfont = dict(color="white", size=13)
+            tr.textfont = dict(color="white", size=30, family="Arial Black")
             tr.textposition = "inside"
+            tr.textinfo = "percent"
+            tr.insidetextorientation = "horizontal"
+            tr.marker.line = dict(color="white", width=3)
         elif tr.type == "bar":
             if tr.marker.color is None or isinstance(tr.marker.color, str):
                 tr.marker.color = _PALETA[i % len(_PALETA)]
-        elif tr.type in ("scatter", "line"):
-            tr.line.color = _PALETA[i % len(_PALETA)]
-            tr.line.width = 3
+            tr.textfont = dict(size=23, color="#1B2436")
+            tr.outsidetextfont = dict(size=23, color="#1B2436")
+            try:
+                tr.marker.cornerradius = 8
+            except Exception:
+                pass
+
+    if barras_h:
+        cats = []
+        for tr in f.data:
+            if tr.type == "bar" and getattr(tr, "orientation", None) == "h":
+                cats = list(tr.y)
+                break
+        f.update_yaxes(showticklabels=False, title="")
+        f.update_layout(bargap=0.55, margin=dict(l=55, r=35, t=40, b=55))
+        for cat in cats:
+            f.add_annotation(x=0, y=cat, text="<b>%s</b>" % cat,
+                             showarrow=False, xanchor="left", yanchor="bottom",
+                             yshift=18, xshift=-2,
+                             font=dict(size=21, color="#1B2436"))
     return f
 
 
-def _fig_a_imagen(fig, w, h, con_leyenda_abajo=True, scale=2):
+def _fig_a_imagen(fig, w, h, con_leyenda_abajo=True, scale=3):
     f = _figura_limpia(fig, con_leyenda_abajo)
     png = f.to_image(format="png", width=w, height=h, scale=scale)
     return Image.open(BytesIO(png))
@@ -106,94 +133,110 @@ class _PDF(FPDF):
         self._pie_texto = pie_texto
         self.set_auto_page_break(auto=True, margin=14)
 
-    def header(self):
-        # Banda institucional con identidad del estudiante (no genérica).
-        self.set_fill_color(*_AZUL)
-        self.rect(0, 0, 210, 20, style="F")
-        self.set_xy(_MX, 4)
-        self.set_font("Helvetica", "B", 12)
-        self.set_text_color(*_BLANCO)
-        self.cell(0, 6, _sanear(ESTUDIANTE), new_x="LMARGIN", new_y="NEXT")
-        self.set_x(_MX)
-        self.set_font("Helvetica", "", 8.5)
-        self.cell(0, 4, _sanear(f"Cuenta {CUENTA}  ·  {CARRERA}  ·  "
-                                "Práctica Profesional"))
-        self.set_y(26)
-
     def footer(self):
         self.set_y(-11)
         self.set_font("Helvetica", "I", 7)
         self.set_text_color(150, 150, 150)
-        self.cell(0, 8, _sanear(f"{self._pie_texto}  ·  página {self.page_no()}"),
+        self.cell(0, 8, _sanear("BitaLogs  ·  %s  ·  página %d"
+                                % (self._pie_texto, self.page_no())),
                   align="C")
 
 
-def _titulo_bloque(pdf, titulo, subtitulo):
-    pdf.set_font("Helvetica", "B", 18)
-    pdf.set_text_color(*_AZUL)
-    pdf.cell(0, 9, _sanear(titulo), align="C", new_x="LMARGIN", new_y="NEXT")
-    if subtitulo:
-        pdf.set_font("Helvetica", "", 11)
-        pdf.set_text_color(*_GRIS_TXT)
-        pdf.cell(0, 6, _sanear(subtitulo), align="C", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(2)
+def _hero(pdf, titulo, subtitulo):
+    """Cabecera azul con logo de BitaLogs e identidad."""
+    x, y, w, h = _MX, 12, _ANCHO, 30
+    # Fondo azul (dos rectángulos para simular degradado suave)
+    pdf.set_fill_color(*_AZUL)
+    pdf.rect(x, y, w, h, style="F", round_corners=True, corner_radius=4)
+    pdf.set_fill_color(*_AZUL_CL)
+    pdf.rect(x + w * 0.62, y, w * 0.38, h, style="F", round_corners=True,
+             corner_radius=4)
+    pdf.set_fill_color(*_AZUL)
+    pdf.rect(x + w * 0.60, y, w * 0.06, h, style="F")
+
+    # Logo en recuadro blanco
+    if os.path.exists(_LOGO_PATH):
+        pdf.set_fill_color(*_BLANCO)
+        pdf.rect(x + 5, y + 6, 18, 18, style="F", round_corners=True,
+                 corner_radius=3)
+        try:
+            pdf.image(_LOGO_PATH, x=x + 6.5, y=y + 7.5, w=15, h=15)
+        except Exception:
+            pass
+
+    # Texto identidad
+    pdf.set_xy(x + 27, y + 7)
+    pdf.set_font("Helvetica", "B", 15)
+    pdf.set_text_color(*_BLANCO)
+    pdf.cell(0, 7, "BitaLogs - Panel de Rendimiento", new_x="LMARGIN",
+             new_y="NEXT")
+    pdf.set_x(x + 27)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(0, 5, _sanear("%s  ·  Cuenta %s  ·  %s"
+                           % (ESTUDIANTE, CUENTA, CARRERA)))
+
+    # Subtítulo del periodo (derecha)
+    pdf.set_xy(x + w * 0.62, y + 9)
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(*_BLANCO)
+    pdf.cell(w * 0.36 - 4, 6, _sanear(subtitulo), align="R")
+
+    pdf.set_y(y + h + 6)
 
 
-def _tarjetas_kpis(pdf, kpis: dict):
+def _tarjetas_kpis(pdf, kpis):
     if not kpis:
         return
     n = len(kpis)
     gap = 4
     ancho = (_ANCHO - gap * (n - 1)) / n
-    alto = 21
+    alto = 20
     y0 = pdf.get_y()
     for i, (k, v) in enumerate(kpis.items()):
         x = _MX + i * (ancho + gap)
-        color = _KPI_COLORES[i % len(_KPI_COLORES)]
+        # tarjeta blanca con barra de acento
+        pdf.set_fill_color(*_BLANCO)
+        pdf.set_draw_color(230, 234, 242)
+        pdf.rect(x, y0, ancho, alto, style="DF", round_corners=True,
+                 corner_radius=2.5)
+        color = _KPI_ACENTOS[i % len(_KPI_ACENTOS)]
         pdf.set_fill_color(*color)
-        # round_corners requiere fpdf2 >= 2.8.7; si la versión instalada
-        # no lo soporta, se cae a esquinas rectas en vez de romper.
-        try:
-            pdf.rect(x, y0, ancho, alto, style="F", round_corners=True,
-                     corner_radius=1.5)
-        except TypeError:
-            pdf.rect(x, y0, ancho, alto, style="F")
-        pdf.set_xy(x, y0 + 3.5)
-        pdf.set_font("Helvetica", "B", 17)
-        pdf.set_text_color(*_BLANCO)
-        pdf.cell(ancho, 8, _sanear(str(v)), align="C")
-        pdf.set_xy(x, y0 + 12.5)
+        pdf.rect(x, y0 + 2, 2.2, alto - 4, style="F")
+        pdf.set_xy(x + 5, y0 + 3.5)
+        pdf.set_font("Helvetica", "B", 15)
+        pdf.set_text_color(*_INK)
+        pdf.cell(ancho - 6, 8, _sanear(str(v)))
+        pdf.set_xy(x + 5, y0 + 12)
         pdf.set_font("Helvetica", "", 7.5)
-        pdf.set_text_color(*_BLANCO)
-        pdf.multi_cell(ancho, 3.5, _sanear(k), align="C")
+        pdf.set_text_color(*_MUTED)
+        pdf.cell(ancho - 6, 4, _sanear(k))
     pdf.set_y(y0 + alto + 6)
 
 
+def _titulo_seccion(pdf, x, y, w, texto, color_hex):
+    pdf.set_fill_color(*_hex_rgb(color_hex))
+    pdf.rect(x, y + 0.5, 2.2, 5.5, style="F")
+    pdf.set_xy(x + 4, y)
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(*_INK)
+    pdf.cell(w - 4, 6.5, _sanear(texto))
+
+
 def _grid_graficos(pdf, figuras, cols=2):
-    """
-    Grilla de `cols` columnas que reparte el ALTO disponible de la
-    página entre las filas de gráficos, para aprovechar el espacio en
-    vez de dejar la mitad inferior en blanco. Cada gráfico se rasteriza
-    al tamaño exacto de su celda.
-    """
     if not figuras:
         return
     gap = 7
     cel_w = (_ANCHO - gap * (cols - 1)) / cols
     n_filas = (len(figuras) + cols - 1) // cols
-
     y_ini = pdf.get_y()
     alto_disp = pdf.page_break_trigger - y_ini
-    # Alto por fila: reparte el espacio, con techo y piso razonables.
-    fila_h = alto_disp / n_filas
-    fila_h = max(58, min(fila_h, 95))
-    titulo_h = 7
-    img_h_mm = fila_h - titulo_h - 4
-
-    # Relación de aspecto de la imagen según el alto de celda en mm.
-    px_w = 900
+    fila_h = max(66, min(alto_disp / n_filas, 100))
+    titulo_h = 9
+    img_h_mm = fila_h - titulo_h - 5
+    px_w = 1000
     px_h = int(px_w * (img_h_mm / cel_w))
 
+    colores = ["#0EA5A5", "#2563EB", "#7C3AED", "#16A34A", "#F59E0B", "#0891B2"]
     idx = 0
     for r in range(n_filas):
         fila = figuras[idx:idx + cols]
@@ -202,33 +245,36 @@ def _grid_graficos(pdf, figuras, cols=2):
         y_fila = pdf.get_y()
         for j, (tit, fig) in enumerate(fila):
             x = _MX + j * (cel_w + gap)
-            # Título de la celda
-            pdf.set_xy(x, y_fila)
-            pdf.set_font("Helvetica", "B", 10.5)
-            pdf.set_text_color(*_AZUL)
-            pdf.cell(cel_w, titulo_h, _sanear(tit), align="C")
-            # Imagen
+            # tarjeta blanca de fondo
+            pdf.set_fill_color(*_BLANCO)
+            pdf.set_draw_color(230, 234, 242)
+            pdf.rect(x, y_fila, cel_w, fila_h - 3, style="DF",
+                     round_corners=True, corner_radius=3)
+            _titulo_seccion(pdf, x + 4, y_fila + 4, cel_w - 8, tit,
+                            colores[(idx + j) % len(colores)])
             img = _fig_a_imagen(fig, px_w, px_h)
-            real_h = cel_w * (img.height / img.width)
-            pdf.image(img, x=x, y=y_fila + titulo_h, w=cel_w, h=real_h)
+            real_h = (cel_w - 8) * (img.height / img.width)
+            pdf.image(img, x=x + 4, y=y_fila + titulo_h + 3, w=cel_w - 8,
+                      h=min(real_h, img_h_mm))
         pdf.set_y(y_fila + fila_h)
         idx += cols
 
 
-def construir_pdf(titulo: str, subtitulo: str, kpis: dict, figuras: list) -> bytes:
+def construir_pdf(titulo, subtitulo, kpis, figuras):
     pdf = _PDF(subtitulo)
     pdf.add_page()
-    _titulo_bloque(pdf, titulo, subtitulo)
+    _hero(pdf, titulo, subtitulo)
     _tarjetas_kpis(pdf, kpis)
     _grid_graficos(pdf, figuras, cols=2)
     return bytes(pdf.output())
 
 
-def construir_pdf_multi(titulo: str, bloques: list) -> bytes:
-    pdf = _PDF(titulo)
+def construir_pdf_multi(titulo, bloques):
+    pie = bloques[0]["subtitulo"] if bloques else titulo
+    pdf = _PDF(pie)
     for b in bloques:
         pdf.add_page()
-        _titulo_bloque(pdf, titulo, b.get("subtitulo", ""))
+        _hero(pdf, titulo, b.get("subtitulo", ""))
         _tarjetas_kpis(pdf, b.get("kpis", {}))
         _grid_graficos(pdf, b.get("figuras", []), cols=2)
     return bytes(pdf.output())

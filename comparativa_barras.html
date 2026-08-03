@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Estilos de barra · comparativa</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  body{background:#EEF1F6;font-family:'Inter',sans-serif;padding:24px;color:#1B2436}
+  .wrap{max-width:1100px;margin:0 auto}
+  h2{font-family:'Poppins';font-weight:800;font-size:20px;margin-bottom:4px}
+  .intro{color:#6B7890;font-size:14px;margin-bottom:22px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .card{background:#fff;border-radius:16px;padding:16px 18px;box-shadow:0 4px 14px rgba(21,36,54,.06)}
+  .card h3{font-family:'Poppins';font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px;margin-bottom:2px}
+  .card .bar{width:5px;height:16px;border-radius:3px;display:inline-block}
+  .card .tag{font-size:11.5px;color:#6B7890;margin-bottom:12px}
+  .rec{display:inline-block;background:#DCFCE7;color:#166534;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:20px;margin-left:6px}
+  .box{position:relative;height:230px}
+  .foot{margin-top:22px;text-align:center;color:#6B7890;font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Estilos de barra · ¿cuál preferís?</h2>
+  <div class="intro">Misma data (Equipos por área), 4 tratamientos visuales. Elegí el número que más te guste.</div>
+
+  <div class="grid">
+    <div class="card">
+      <h3><span class="bar" style="background:#2563EB"></span>Opción 1 · Actual (plano)</h3>
+      <div class="tag">Barras lisas, sin borde ni riel. Lo que tenés ahora.</div>
+      <div class="box"><canvas id="c1"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h3><span class="bar" style="background:#2563EB"></span>Opción 2 · Borde blanco <span class="rec">lo que pediste</span></h3>
+      <div class="tag">Cada barra con contorno blanco, como los donas.</div>
+      <div class="box"><canvas id="c2"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h3><span class="bar" style="background:#2563EB"></span>Opción 3 · Riel gris + redondeo <span class="rec">mi recomendación</span></h3>
+      <div class="tag">Fondo gris claro detrás de cada barra y esquinas redondeadas. Estilo dashboard moderno.</div>
+      <div class="box"><canvas id="c3"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h3><span class="bar" style="background:#2563EB"></span>Opción 4 · Degradado + sombra</h3>
+      <div class="tag">Barras con degradado sutil y sombra. Más llamativo.</div>
+      <div class="box"><canvas id="c4"></canvas></div>
+    </div>
+  </div>
+
+  <div class="foot">Decime el número (1, 2, 3 o 4) y lo aplico a todas las gráficas de barras del dashboard.</div>
+</div>
+
+<script>
+const labels=['Emergencia','Hosp. A','Hosp. B','Laboratorio','Quirófano','UCI A','UCN'];
+const data=[1,2,2,13,2,1,1];
+const AZUL='#2563EB';
+Chart.defaults.color='#6B7890';Chart.defaults.font.family="'Inter',sans-serif";
+
+// 1 - plano
+new Chart(document.getElementById('c1'),{type:'bar',
+  data:{labels,datasets:[{data,backgroundColor:AZUL,borderRadius:4}]},
+  options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+    scales:{x:{grid:{display:false}},y:{grid:{color:'#EEF1F6'},beginAtZero:true}}}});
+
+// 2 - borde blanco
+new Chart(document.getElementById('c2'),{type:'bar',
+  data:{labels,datasets:[{data,backgroundColor:AZUL,borderColor:'#fff',borderWidth:3,borderRadius:4}]},
+  options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+    scales:{x:{grid:{display:false}},y:{grid:{color:'#EEF1F6'},beginAtZero:true}}}});
+
+// 3 - riel gris + redondeo (usa un dataset de fondo)
+const maxV=Math.max(...data);
+new Chart(document.getElementById('c3'),{type:'bar',
+  data:{labels,datasets:[
+    {data:data.map(()=>maxV),backgroundColor:'#EEF2F8',borderRadius:8,barPercentage:.62,categoryPercentage:.8,grouped:false,order:2},
+    {data,backgroundColor:AZUL,borderRadius:8,barPercentage:.62,categoryPercentage:.8,grouped:false,order:1}
+  ]},
+  options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{filter:i=>i.datasetIndex===1}},
+    scales:{x:{grid:{display:false},stacked:false},y:{grid:{display:false},beginAtZero:true,max:maxV}}}});
+
+// 4 - degradado + sombra
+const ctx=document.getElementById('c4').getContext('2d');
+const grad=ctx.createLinearGradient(0,0,0,230);
+grad.addColorStop(0,'#3B82F6');grad.addColorStop(1,'#93C5FD');
+new Chart(document.getElementById('c4'),{type:'bar',
+  data:{labels,datasets:[{data,backgroundColor:grad,borderRadius:8}]},
+  options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+    scales:{x:{grid:{display:false}},y:{grid:{color:'#EEF1F6'},beginAtZero:true}}}});
+</script>
+</body>
+</html>

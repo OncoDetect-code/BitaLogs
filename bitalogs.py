@@ -35,6 +35,7 @@ import calendario as cal
 from importar_bitacora import leer_matriz
 from formato_bitacora import bitacora_html
 from matriz_excel import matriz_xlsx_bytes
+import ui_dashboard as ui
 from reporte_pdf import construir_pdf, construir_pdf_multi
 from splash import mostrar_splash
 
@@ -51,7 +52,7 @@ def hoy_hn() -> date:
 AREAS = ["Hospitalización A", "Hospitalización B", "UCI A", "UCI B",
          "Sala Cuna", "UCIN", "Emergencia", "CEYE", "Laboratorio",
          "Quirófano 1", "Quirófano 2", "Quirófano 3", "Quirófano 4",
-         "Área de mantenimiento", "Otra"]
+         "Área de mantenimiento", "HDV La Lima", "Otra"]
 TIPOS = ["Preventivo", "Correctivo", "Revisión y Diagnóstico",
          "Instalación", "Capacitación", "Otro"]
 RESUELTO = ["Sí", "Parcial", "No"]
@@ -543,6 +544,8 @@ _ICONO = Path(__file__).parent / "bitalogs_icon.png"
 st.set_page_config(page_title="BitaLogs · Práctica Profesional",
                    page_icon=str(_ICONO) if _ICONO.exists() else "📘",
                    layout="wide")
+
+ui.inyectar_estilos()   # estilo visual del dashboard rediseñado
 
 # CSS responsive: en desktop mantiene el ancho amplio; en celular fuerza
 # que el contenido ocupe todo el ancho y quede centrado (sin el hueco a
@@ -1049,28 +1052,7 @@ with tab_dash:
         if ft:
             fdf = fdf[fdf["tipo"].isin(ft)]
 
-        # ---- KPIs principales ----
-        total = len(fdf)
-        equipos_unicos = fdf["equipo"].str.strip().str.lower().nunique()
-        dur_prom = fdf["duracion_min"].dropna().mean()
-        # Días con actividad para "equipos por día"
-        dias_activos = fdf["_fecha"].dt.date.nunique()
-        eq_por_dia = (total / dias_activos) if dias_activos else 0
-
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Equipos atendidos", total,
-                  help="Total de atenciones según los filtros.")
-        k2.metric("Equipos únicos", equipos_unicos)
-        k3.metric("Prom. atención",
-                  f"{dur_prom:.0f} min" if pd.notna(dur_prom) else "-",
-                  help="Duración promedio por atención (inicio→fin).")
-        k4.metric("Equipos por día",
-                  f"{eq_por_dia:.1f}" if dias_activos else "-",
-                  help="Promedio de equipos atendidos por día con actividad.")
-
-        # ---- Horas acumuladas ----
-        st.divider()
-        st.subheader("⏱️ Horas de práctica")
+        # ---- Horas (se calculan primero para el hero) ----
         hoy = hoy_hn()
         ref = hoy
         if modo == "Semana" and sem_sel:
@@ -1081,23 +1063,54 @@ with tab_dash:
         horas_tot = cal.horas_totales_practica()
         sem_actual = cal.semana_de_fecha(ref) or (
             cal.TOTAL_SEMANAS if ref >= cal.fin_practica() else 1)
+        progreso = horas_acum / horas_tot * 100 if horas_tot else 0
 
-        hk1, hk2, hk3 = st.columns(3)
-        hk1.metric("Horas acumuladas", f"{horas_acum} h",
-                   help=f"A la fecha de referencia ({cal._fmt(ref)}), "
-                        "asumiendo 8 h/día L-V.")
-        hk2.metric("Horas totales", f"{horas_tot} h")
-        hk3.metric("Progreso", f"{horas_acum/horas_tot*100:.0f}%",
-                   help=f"Semana {sem_actual} de {cal.TOTAL_SEMANAS}.")
-        st.progress(min(horas_acum / horas_tot, 1.0))
+        # Actividades extra (para el KPI de "otras actividades")
+        _dfa_hero = load_actividades_extra()
+        _dfa_hero["_fecha"] = pd.to_datetime(_dfa_hero.get("fecha"),
+                                             errors="coerce")
+        _fa = _dfa_hero.copy()
+        if modo == "Semana" and sem_sel:
+            _fa = _fa[_fa["semana"] == sem_sel]
+        elif modo == "Día" and dia_fecha is not None:
+            _fa = _fa[_fa["_fecha"].dt.date == dia_fecha]
+        horas_mant_hero = (fdf["duracion_min"].dropna().sum() / 60.0
+                           if not fdf.empty else 0.0)
+        horas_extra_hero = (_fa["horas"].dropna().sum()
+                            if not _fa.empty else 0.0)
 
-        # Gráfico de horas acumuladas por semana
-        hsem = pd.DataFrame(cal.horas_por_semana_acumuladas())
-        fig_h = px.line(hsem, x="etiqueta", y="horas_acumuladas",
-                        markers=True, title="Horas acumuladas por semana",
-                        labels={"etiqueta": "", "horas_acumuladas": "Horas"})
-        fig_h.update_traces(line_color="#1F4E78")
-        st.plotly_chart(fig_h, use_container_width=True)
+        # ---- Hero ----
+        if modo == "Semana" and sem_sel:
+            _periodo_txt = f"Semana {sem_sel}"
+        elif modo == "Día" and dia_fecha is not None:
+            _periodo_txt = cal.etiqueta_dia(dia_fecha)
+        else:
+            _periodo_txt = "Toda la práctica"
+        ui.hero(
+            subtitulo="Práctica Profesional · Ingeniería Biomédica · UNITEC",
+            horas_acum=horas_acum, horas_tot=horas_tot,
+            periodo_txt=_periodo_txt, progreso=progreso)
+
+        # ---- KPIs principales ----
+        total = len(fdf)
+        equipos_unicos = fdf["equipo"].str.strip().str.lower().nunique()
+        dur_prom = fdf["duracion_min"].dropna().mean()
+        dias_activos = fdf["_fecha"].dt.date.nunique()
+        eq_por_dia = (total / dias_activos) if dias_activos else 0
+
+        ui.fila_kpis([
+            {"valor": str(total), "label": "Equipos atendidos",
+             "icono": "equipos"},
+            {"valor": f"{horas_acum}", "unidad": "h",
+             "label": "Horas acumuladas", "icono": "reloj"},
+            {"valor": f"{horas_mant_hero:.1f}", "unidad": "h",
+             "label": "Mantenimiento", "icono": "llave"},
+            {"valor": f"{horas_extra_hero:.1f}", "unidad": "h",
+             "label": "Otras actividades", "icono": "lista"},
+            {"valor": f"{progreso:.0f}", "unidad": "%",
+             "label": "Progreso", "icono": "tendencia"},
+        ])
+
 
         # ---- Distribución de tiempo por tipo de actividad ----
         # Combina las horas de mantenimiento de equipo (calculadas de
@@ -1105,8 +1118,8 @@ with tab_dash:
         # actividades (visitas, infografías, etc.) cargadas en
         # 'actividades_extra', respetando el mismo filtro de Semana/
         # Día/Toda la práctica que el resto del Dashboard.
-        st.divider()
-        st.subheader("⏱️ Distribución de tiempo por tipo de actividad")
+        ui.encabezado_seccion("Distribución de tiempo por tipo de actividad",
+                              ui.PALETA[1])
 
         df_act = load_actividades_extra()
         df_act["_fecha"] = pd.to_datetime(df_act.get("fecha"), errors="coerce")
@@ -1132,19 +1145,10 @@ with tab_dash:
                     "otras actividades) para este filtro.")
             fig_dist = None
         else:
-            # Paleta institucional de al menos 3 colores; si hay más
-            # categorías que colores, Plotly la repite en ciclo.
-            PALETA_ACTIVIDADES = ["#1F4E78", "#2E8B57", "#C0392B",
-                                  "#8E44AD", "#D68910"]
             fig_dist = px.bar(dist, x="Horas", y="Tipo de actividad",
                               orientation="h", text="Horas",
                               color="Tipo de actividad",
-                              color_discrete_sequence=PALETA_ACTIVIDADES)
-            # En pantallas angostas (móvil) las etiquetas largas del eje Y
-            # aplastan las barras. Se ocultan las etiquetas del eje y en su
-            # lugar el nombre de cada actividad va COMO título encima de su
-            # barra, alineado a la izquierda, para que la barra use todo el
-            # ancho disponible. Las horas quedan al final de cada barra.
+                              color_discrete_sequence=ui.PALETA)
             fig_dist.update_traces(
                 texttemplate="%{text:.1f} h", textposition="outside",
                 cliponaxis=False)
@@ -1153,43 +1157,42 @@ with tab_dash:
                     x=0, y=fila_d["Tipo de actividad"],
                     text=f"<b>{fila_d['Tipo de actividad']}</b>",
                     showarrow=False, xanchor="left", yanchor="bottom",
-                    yshift=10, xshift=-2,
-                    font=dict(size=12, color="#333333"))
+                    yshift=16, xshift=-2,
+                    font=dict(size=13, color="#1B2436"))
+            altura_dist = max(360, 62 * len(dist) + 60)
+            ui.estilizar_figura(fig_dist, altura=altura_dist, leyenda=False)
             fig_dist.update_layout(
                 yaxis=dict(showticklabels=False, title=""),
                 xaxis=dict(title="Horas"),
-                showlegend=False,
-                margin=dict(l=8, r=40, t=10, b=40),
-                bargap=0.45,
+                margin=dict(l=8, r=45, t=14, b=40),
+                bargap=0.55,
                 uniformtext=dict(mode="hide", minsize=10))
             st.plotly_chart(fig_dist, use_container_width=True)
-            dk1, dk2, dk3 = st.columns(3)
-            dk1.metric("Horas mantenimiento", f"{horas_mant:.1f} h")
-            dk2.metric("Horas otras actividades", f"{horas_extra_tot:.1f} h")
-            dk3.metric("Total registrado", f"{horas_mant + horas_extra_tot:.1f} h")
 
         # ---- Gráficos de rendimiento ----
-        st.divider()
         g1, g2 = st.columns(2)
         with g1:
             por_area = (fdf.groupby("area").size()
                         .reindex(AREAS, fill_value=0)
                         .rename_axis("Área").reset_index(name="Equipos"))
             por_area = por_area[por_area["Equipos"] > 0]
+            ui.encabezado_seccion("Equipos por área", ui.PALETA[0])
             if por_area.empty:
-                st.caption("📊 Equipos por área")
                 st.info("Aún no hay atenciones con área asignada para mostrar.")
             else:
                 fig = px.bar(por_area, x="Área", y="Equipos",
-                             title="Equipos por área")
-                fig.update_traces(marker_color="#1F4E78")
+                             color_discrete_sequence=[ui.PALETA[0]])
                 fig.update_layout(xaxis_tickangle=-40)
+                ui.estilizar_figura(fig, altura=290, leyenda=False)
                 st.plotly_chart(fig, use_container_width=True)
         with g2:
             por_tipo = (fdf.groupby("tipo").size()
                         .rename_axis("Tipo").reset_index(name="Cantidad"))
-            fig2 = px.pie(por_tipo, names="Tipo", values="Cantidad",
-                          title="Tipo de mantenimiento", hole=0.4)
+            ui.encabezado_seccion("Tipo de mantenimiento", ui.PALETA[2])
+            fig2 = px.pie(por_tipo, names="Tipo", values="Cantidad", hole=0.55,
+                          color_discrete_sequence=ui.PALETA)
+            fig2.update_traces(textposition="inside", textinfo="percent")
+            ui.estilizar_figura(fig2, altura=290, leyenda=True)
             st.plotly_chart(fig2, use_container_width=True)
 
         g3, g4 = st.columns(2)
@@ -1197,36 +1200,40 @@ with tab_dash:
             por_res = (fdf.groupby("resuelto").size()
                        .reindex(RESUELTO, fill_value=0)
                        .rename_axis("¿Resuelto?").reset_index(name="Cantidad"))
-            fig3 = px.bar(por_res, x="¿Resuelto?", y="Cantidad",
-                          title="Tasa de resolución",
+            ui.encabezado_seccion("Estado de resolución", ui.PALETA[5])
+            fig3 = px.pie(por_res, names="¿Resuelto?", values="Cantidad",
+                          hole=0.55,
                           color="¿Resuelto?",
-                          color_discrete_map={"Sí": "#2E8B57",
-                                              "Parcial": "#E8A317",
-                                              "No": "#C0392B"})
-            fig3.update_layout(showlegend=False)
+                          color_discrete_map={"Sí": ui.PALETA[5],
+                                              "Parcial": ui.PALETA[3],
+                                              "No": ui.PALETA[4]})
+            fig3.update_traces(textposition="inside", textinfo="percent")
+            ui.estilizar_figura(fig3, altura=290, leyenda=True)
             st.plotly_chart(fig3, use_container_width=True)
         with g4:
             dd = fdf.dropna(subset=["duracion_min"])
+            ui.encabezado_seccion("Duración de las atenciones", ui.PALETA[6])
             if not dd.empty:
                 fig4 = px.histogram(dd, x="duracion_min", nbins=12,
-                                    title="Distribución de duración (min)")
-                fig4.update_traces(marker_color="#1F4E78")
-                fig4.update_layout(showlegend=False,
-                                   xaxis_title="Minutos", yaxis_title="Atenciones")
+                                    color_discrete_sequence=[ui.PALETA[6]])
+                fig4.update_layout(xaxis_title="Minutos",
+                                   yaxis_title="Atenciones")
+                ui.estilizar_figura(fig4, altura=290, leyenda=False)
                 st.plotly_chart(fig4, use_container_width=True)
             else:
-                st.caption("Sin datos de duración para graficar.")
+                st.info("Sin datos de duración para graficar.")
 
         # ---- Equipos por semana ----
         if modo == "Toda la práctica":
-            st.divider()
             por_sem = (fdf.dropna(subset=["semana"]).groupby("semana").size()
                        .reindex(cal.lista_semanas(), fill_value=0)
                        .rename_axis("Semana").reset_index(name="Equipos"))
             por_sem["Semana"] = por_sem["Semana"].apply(lambda n: f"Sem {n}")
-            fig5 = px.bar(por_sem, x="Semana", y="Equipos",
-                          title="Equipos atendidos por semana", text="Equipos")
-            fig5.update_traces(marker_color="#2E8B57", textposition="outside")
+            ui.encabezado_seccion("Equipos atendidos por semana", ui.PALETA[1])
+            fig5 = px.bar(por_sem, x="Semana", y="Equipos", text="Equipos",
+                          color_discrete_sequence=[ui.PALETA[1]])
+            fig5.update_traces(textposition="outside")
+            ui.estilizar_figura(fig5, altura=280, leyenda=False)
             st.plotly_chart(fig5, use_container_width=True)
 
         # ---- Reporte PDF (dashboard, imprimible) ----
