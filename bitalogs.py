@@ -1214,8 +1214,22 @@ with tab_dash:
             dd = fdf.dropna(subset=["duracion_min"])
             ui.encabezado_seccion("Duración de las atenciones", ui.PALETA[6])
             if not dd.empty:
-                fig4 = px.histogram(dd, x="duracion_min", nbins=12,
-                                    color_discrete_sequence=[ui.PALETA[6]])
+                # Se agrupa la duración en rangos y se grafica como barras
+                # (no histograma) para que respeten las esquinas redondeadas
+                # del resto del dashboard.
+                bins = [0, 15, 30, 45, 60, 90, 120, 9999]
+                etiquetas = ["0-15", "15-30", "30-45", "45-60",
+                             "60-90", "90-120", "120+"]
+                dd = dd.copy()
+                dd["rango"] = pd.cut(dd["duracion_min"], bins=bins,
+                                     labels=etiquetas, right=False)
+                por_dur = (dd.groupby("rango", observed=False).size()
+                           .reindex(etiquetas, fill_value=0)
+                           .rename_axis("Rango").reset_index(name="Atenciones"))
+                fig4 = px.bar(por_dur, x="Rango", y="Atenciones",
+                              text="Atenciones",
+                              color_discrete_sequence=[ui.PALETA[6]])
+                fig4.update_traces(textposition="outside")
                 fig4.update_layout(xaxis_title="Minutos",
                                    yaxis_title="Atenciones")
                 ui.estilizar_figura(fig4, altura=290, leyenda=False)
@@ -1258,7 +1272,8 @@ with tab_dash:
                     pdf_bytes = construir_pdf(
                         titulo="BitaLogs - Reporte de Indicadores",
                         subtitulo=etiqueta_periodo,
-                        kpis=kpis_pdf, figuras=figuras_pdf)
+                        kpis=kpis_pdf, figuras=figuras_pdf,
+                        progreso=horas_acum / horas_tot * 100 if horas_tot else 0)
                 st.download_button(
                     "📥 Descargar PDF", data=pdf_bytes,
                     file_name=f"BitaLogs_{etiqueta_periodo.replace(' ', '_')}.pdf",
@@ -1285,7 +1300,8 @@ with tab_dash:
                             sub, sub_act, f"Semana {s}", h_acum, horas_tot)
                         bloques.append({
                             "subtitulo": f"Semana {s}",
-                            "kpis": kpis_s, "figuras": figs_s})
+                            "kpis": kpis_s, "figuras": figs_s,
+                            "progreso": h_acum / horas_tot * 100 if horas_tot else 0})
 
                     if not bloques:
                         st.warning("No hay datos registrados en ninguna semana.")
