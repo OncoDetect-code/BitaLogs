@@ -16,7 +16,7 @@ import os
 import base64
 from io import BytesIO
 
-import pdfkit
+from weasyprint import HTML
 from PIL import Image
 
 # ---- Identidad ----
@@ -36,32 +36,8 @@ try:
 except Exception:
     _LOGO = ""
 
-# Configuración de wkhtmltopdf: busca el binario tanto en Linux
-# (Streamlit Cloud: /usr/bin) como en Windows (Program Files). Así el
-# mismo código funciona en local y en el deploy sin cambios.
-_WK = None
-_RUTAS_WK = (
-    "/usr/bin/wkhtmltopdf",
-    "/usr/local/bin/wkhtmltopdf",
-    r"C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe",
-    r"C:\Program Files (x86)\wkhtmltopdf\bin\wkhtmltopdf.exe",
-)
-for _p in _RUTAS_WK:
-    if os.path.exists(_p):
-        try:
-            _WK = pdfkit.configuration(wkhtmltopdf=_p)
-            break
-        except Exception:
-            continue
-# Último recurso: confiar en que esté en el PATH.
-if _WK is None:
-    try:
-        _WK = pdfkit.configuration()
-    except Exception:
-        _WK = None
 
-
-def _fig_img_b64(fig, w=820, h=560, tipo="bar"):
+def _fig_img_b64(fig, w=820, h=500, tipo="bar"):
     """Rasteriza una figura Plotly a PNG y la devuelve como data-URI."""
     f = _estilizar(fig, tipo)
     png = f.to_image(format="png", width=w, height=h, scale=2)
@@ -187,66 +163,60 @@ def _bloque_html(subtitulo, kpis, figuras, progreso=None):
       </div>
       {barra_prog}
       <div class="kpis">{kpi_html}</div>
-      <div class="grid">{graf_html}<div class="clear"></div></div>
+      <div class="grid">{graf_html}</div>
     </div>"""
 
 
 _CSS = """
   @page { size: A4 portrait; margin: 8mm; }
-  *{box-sizing:border-box;margin:0;padding:0;font-family:'Helvetica Neue',Arial,sans-serif}
+  *{box-sizing:border-box;margin:0;padding:0;font-family:Arial,Helvetica,sans-serif}
   body{color:#1B2436;background:#fff}
   .page{page-break-after:always}
   .page:last-child{page-break-after:auto}
-  .clear{clear:both}
 
-  /* Hero grande y con presencia */
-  .hero{background:#3B82F6;background:linear-gradient(120deg,#3B82F6,#60A5FA);
-        border-radius:20px;padding:30px 32px;color:#fff;margin-bottom:16px;
-        width:100%;display:table}
-  .hero-l{display:table-cell;vertical-align:middle;width:74%}
-  .hero-r{display:table-cell;vertical-align:middle;text-align:right;
-          font-size:22px;font-weight:800;color:#fff}
-  .mark{width:82px;height:82px;border-radius:18px;background:#fff;
-        display:inline-block;vertical-align:middle;padding:11px;text-align:center}
-  .mark img{width:60px;height:60px;object-fit:contain;vertical-align:middle}
-  .hero-txt{display:inline-block;vertical-align:middle;margin-left:20px}
-  .hero h1{font-size:29px;font-weight:800;line-height:1.1}
-  .hero-txt p{color:#DCE9FF;font-size:15px;margin-top:6px}
+  /* Hero, con flex (WeasyPrint sí lo soporta) */
+  .hero{background:linear-gradient(120deg,#3B82F6,#60A5FA);
+        border-radius:18px;padding:18px 24px;color:#fff;margin-bottom:11px;
+        display:flex;align-items:center;justify-content:space-between}
+  .hero-l{display:flex;align-items:center}
+  .mark{width:62px;height:62px;border-radius:15px;background:#fff;
+        display:flex;align-items:center;justify-content:center;padding:8px;
+        flex:none}
+  .mark img{max-width:100%;max-height:100%;object-fit:contain}
+  .hero-txt{margin-left:15px}
+  .hero h1{font-size:23px;font-weight:800;line-height:1.15}
+  .hero-txt p{color:#DCE9FF;font-size:12.5px;margin-top:4px}
+  .hero-r{font-size:19px;font-weight:800;color:#fff;text-align:right;
+          white-space:nowrap;padding-left:12px}
 
-  .prog{height:11px;border-radius:7px;background:#E6EAF2;overflow:hidden;margin-bottom:16px}
-  .prog-bar{height:100%;background:#2563EB;border-radius:7px}
+  .prog{height:9px;border-radius:6px;background:#E6EAF2;overflow:hidden;margin-bottom:12px}
+  .prog-bar{height:100%;background:#2563EB;border-radius:6px}
 
-  /* KPIs en dos filas centradas: 3 arriba, 2 abajo, grandes */
-  .kpis{width:100%;margin-bottom:16px;text-align:center}
-  .kpi-row{width:100%;margin-bottom:12px;font-size:0;text-align:center}
+  /* KPIs con flex, 3+2 centrados */
+  .kpis{margin-bottom:12px}
+  .kpi-row{display:flex;justify-content:center;gap:12px;margin-bottom:10px}
   .kpi-row:last-child{margin-bottom:0}
-  .kpi{display:inline-block;vertical-align:top;width:31.5%;margin:0 0.8%;
-       background:#fff;border:1px solid #E6EAF2;border-radius:15px;
-       padding:20px 22px;min-height:104px;text-align:left}
-  .kpi .ico{width:50px;height:50px;border-radius:13px;text-align:center;
-            line-height:50px;margin-bottom:11px}
-  .kpi .ico svg{width:26px;height:26px;vertical-align:middle}
-  .kpi .val{font-size:32px;font-weight:800;line-height:1}
-  .kpi .lbl{font-size:13px;color:#6B7890;font-weight:600;margin-top:6px}
+  .kpi{width:32%;background:#fff;border:1px solid #E6EAF2;border-radius:13px;
+       padding:13px 16px;min-height:78px}
+  .kpi .ico{width:38px;height:38px;border-radius:10px;display:flex;
+            align-items:center;justify-content:center;margin-bottom:7px}
+  .kpi .ico svg{width:20px;height:20px}
+  .kpi .val{font-size:24px;font-weight:800;line-height:1}
+  .kpi .lbl{font-size:11px;color:#6B7890;font-weight:600;margin-top:4px}
 
-  /* Grilla de gráficos: 2 columnas, grandes */
-  .grid{width:100%;overflow:hidden}
-  .gcard{float:left;width:49%;background:#fff;border:1px solid #E6EAF2;
-         border-radius:16px;padding:18px 20px;margin-bottom:15px}
-  .gcard:nth-child(odd){margin-right:2%}
-  .gh{font-size:16px;font-weight:700;margin-bottom:10px;padding-left:11px;
-      border-left:6px solid #2563EB;line-height:1.2}
+  /* Grilla de gráficos con flex */
+  .grid{display:flex;flex-wrap:wrap;gap:2%}
+  .gcard{width:49%;background:#fff;border:1px solid #E6EAF2;
+         border-radius:14px;padding:12px 15px;margin-bottom:12px;
+         page-break-inside:avoid}
+  .gh{font-size:14px;font-weight:700;margin-bottom:7px;padding-left:10px;
+      border-left:5px solid #2563EB;line-height:1.2}
   .gimg{width:100%;height:auto;display:block}
 """
 
 
 def _html_completo(cuerpo):
     return f"<!DOCTYPE html><html><head><meta charset='utf-8'><style>{_CSS}</style></head><body>{cuerpo}</body></html>"
-
-
-_OP = {"page-size": "A4", "margin-top": "8mm", "margin-bottom": "8mm",
-       "margin-left": "8mm", "margin-right": "8mm", "encoding": "UTF-8",
-       "enable-local-file-access": None, "quiet": ""}
 
 
 def _colores_secciones(n):
@@ -268,7 +238,7 @@ def construir_pdf(titulo, subtitulo, kpis, figuras, progreso=None):
     figs = _prep_figuras(figuras)
     cuerpo = _bloque_html(subtitulo, kpis, figs, progreso)
     html = _html_completo(cuerpo)
-    return pdfkit.from_string(html, False, options=_OP, configuration=_WK)
+    return HTML(string=html).write_pdf()
 
 
 def construir_pdf_multi(titulo, bloques):
@@ -278,4 +248,4 @@ def construir_pdf_multi(titulo, bloques):
         cuerpo += _bloque_html(b.get("subtitulo", ""), b.get("kpis", {}),
                                figs, b.get("progreso"))
     html = _html_completo(cuerpo)
-    return pdfkit.from_string(html, False, options=_OP, configuration=_WK)
+    return HTML(string=html).write_pdf()
