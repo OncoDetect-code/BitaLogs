@@ -1273,7 +1273,8 @@ with tab_dash:
                         titulo="BitaLogs - Reporte de Indicadores",
                         subtitulo=etiqueta_periodo,
                         kpis=kpis_pdf, figuras=figuras_pdf,
-                        progreso=horas_acum / horas_tot * 100 if horas_tot else 0)
+                        progreso=horas_acum / horas_tot * 100 if horas_tot else 0,
+                        horas_acum=horas_acum, horas_tot=horas_tot)
                 st.download_button(
                     "📥 Descargar PDF", data=pdf_bytes,
                     file_name=f"BitaLogs_{etiqueta_periodo.replace(' ', '_')}.pdf",
@@ -1301,7 +1302,8 @@ with tab_dash:
                         bloques.append({
                             "subtitulo": f"Semana {s}",
                             "kpis": kpis_s, "figuras": figs_s,
-                            "progreso": h_acum / horas_tot * 100 if horas_tot else 0})
+                            "progreso": h_acum / horas_tot * 100 if horas_tot else 0,
+                            "horas_acum": h_acum, "horas_tot": horas_tot})
 
                     if not bloques:
                         st.warning("No hay datos registrados en ninguna semana.")

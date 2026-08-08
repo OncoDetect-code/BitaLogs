@@ -114,7 +114,8 @@ def _iconos_kpi():
 _ACENTOS_BG = ["#E0EBFF", "#D7F5F2", "#FEE2E2", "#EDE4FF", "#FEF0CF"]
 
 
-def _bloque_html(subtitulo, kpis, figuras, progreso=None):
+def _bloque_html(subtitulo, kpis, figuras, progreso=None,
+                 horas_acum=None, horas_tot=None):
     """HTML de un bloque (una página) con hero, KPIs y grilla de gráficos."""
     logo = (f'<img src="{_LOGO}" alt="">' if _LOGO else "")
     iconos = _iconos_kpi()
@@ -140,6 +141,18 @@ def _bloque_html(subtitulo, kpis, figuras, progreso=None):
     if progreso is not None:
         barra_prog = f'<div class="prog"><div class="prog-bar" style="width:{max(0,min(progreso,100)):.1f}%"></div></div>'
 
+    # Hero derecho: si hay horas, muestra el dato estrella grande
+    # (104 h / 400 h) con periodo y % completado, como el dashboard.
+    if horas_acum is not None and horas_tot:
+        pct_txt = f"{progreso:.0f}% completado" if progreso is not None else ""
+        cap = f"{subtitulo} · {pct_txt}" if pct_txt else subtitulo
+        hero_r = (f'<div class="hero-r">'
+                  f'<div class="big">{horas_acum} h '
+                  f'<span>/ {horas_tot} h</span></div>'
+                  f'<div class="cap">{cap}</div></div>')
+    else:
+        hero_r = f'<div class="hero-r"><div class="cap">{subtitulo}</div></div>'
+
     # Gráficos como imágenes, en grilla 2 columnas
     graf_html = ""
     for tit, img_b64, color in figuras:
@@ -159,7 +172,7 @@ def _bloque_html(subtitulo, kpis, figuras, progreso=None):
             <p>{ESTUDIANTE} · Cuenta {CUENTA} · {CARRERA}</p>
           </div>
         </div>
-        <div class="hero-r">{subtitulo}</div>
+        {hero_r}
       </div>
       {barra_prog}
       <div class="kpis">{kpi_html}</div>
@@ -186,8 +199,11 @@ _CSS = """
   .hero-txt{margin-left:15px}
   .hero h1{font-size:23px;font-weight:800;line-height:1.15}
   .hero-txt p{color:#DCE9FF;font-size:12.5px;margin-top:4px}
-  .hero-r{font-size:19px;font-weight:800;color:#fff;text-align:right;
-          white-space:nowrap;padding-left:12px}
+  .hero-r{color:#fff;text-align:right;white-space:nowrap;padding-left:12px}
+  .hero-r .big{font-size:30px;font-weight:800;line-height:1}
+  .hero-r .big span{font-size:16px;color:#DCE9FF;font-weight:700}
+  .hero-r .cap{color:#DCE9FF;font-size:11px;text-transform:uppercase;
+               letter-spacing:.4px;margin-top:5px;font-weight:600}
 
   .prog{height:9px;border-radius:6px;background:#E6EAF2;overflow:hidden;margin-bottom:12px}
   .prog-bar{height:100%;background:#2563EB;border-radius:6px}
@@ -234,9 +250,11 @@ def _prep_figuras(figuras):
     return out
 
 
-def construir_pdf(titulo, subtitulo, kpis, figuras, progreso=None):
+def construir_pdf(titulo, subtitulo, kpis, figuras, progreso=None,
+                  horas_acum=None, horas_tot=None):
     figs = _prep_figuras(figuras)
-    cuerpo = _bloque_html(subtitulo, kpis, figs, progreso)
+    cuerpo = _bloque_html(subtitulo, kpis, figs, progreso,
+                          horas_acum, horas_tot)
     html = _html_completo(cuerpo)
     return HTML(string=html).write_pdf()
 
@@ -246,6 +264,7 @@ def construir_pdf_multi(titulo, bloques):
     for b in bloques:
         figs = _prep_figuras(b.get("figuras", []))
         cuerpo += _bloque_html(b.get("subtitulo", ""), b.get("kpis", {}),
-                               figs, b.get("progreso"))
+                               figs, b.get("progreso"),
+                               b.get("horas_acum"), b.get("horas_tot"))
     html = _html_completo(cuerpo)
     return HTML(string=html).write_pdf()
