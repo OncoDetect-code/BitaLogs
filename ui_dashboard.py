@@ -324,6 +324,24 @@ def estilizar_figura(fig, altura=300, leyenda=True):
     return fig
 
 
+def tarjeta_categoria_unica(categoria, color=None):
+    """
+    Tarjeta destacada para cuando un donut tendría una sola categoría
+    (100%). En vez de un círculo completo sin información, muestra
+    '100% <categoria>' de forma clara.
+    """
+    c = color or _AZUL
+    st.markdown(f"""
+    <div style="display:flex;align-items:center;gap:16px;padding:26px 24px;
+                background:linear-gradient(120deg,#EAF1FF,#F5F8FF);
+                border:1px solid #DCE7FB;border-radius:14px;min-height:200px">
+      <div style="font-family:'Poppins',sans-serif;font-weight:800;
+                  font-size:40px;color:{c};line-height:1">100%</div>
+      <div style="font-size:16px;color:#1B2436;font-weight:600">{categoria}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
 def aplicar_paleta(fig):
     """Fuerza la paleta viva del dashboard sobre las trazas de la figura."""
     for i, tr in enumerate(fig.data):

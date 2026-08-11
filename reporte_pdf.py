@@ -51,19 +51,32 @@ def _estilizar(fig, tipo):
     barras_h = any(getattr(t, "orientation", None) == "h"
                    for t in f.data if t.type == "bar")
     tiene_pie = any(t.type == "pie" for t in f.data)
+    # Barras apiladas / agrupadas: varias trazas de barras con nombre
+    # (p. ej. la evolución del tipo por semana). Necesitan leyenda para
+    # saber qué color es cada serie.
+    trazas_bar_nombradas = [t for t in f.data
+                            if t.type == "bar" and getattr(t, "name", None)]
+    trazas_linea_nombradas = [t for t in f.data
+                              if t.type == "scatter" and getattr(t, "name", None)]
+    es_apilado = (f.layout.barmode == "stack") or len(trazas_bar_nombradas) > 1
+    es_multilinea = len(trazas_linea_nombradas) > 1
+    # Las barras horizontales ya llevan el nombre de cada categoría como
+    # título arriba de la barra, así que la leyenda sería redundante y se
+    # amontona: se omite en ese caso.
+    mostrar_leyenda = (tiene_pie or es_apilado or es_multilinea) and not barras_h
 
     f.update_layout(
         template="plotly_white",
         paper_bgcolor="white", plot_bgcolor="white",
         font=dict(color="#1B2436", size=15, family="Arial"),
         title=None, margin=dict(l=45, r=25, t=15, b=55),
-        showlegend=tiene_pie,
+        showlegend=mostrar_leyenda,
     )
     f.update_xaxes(gridcolor="#EEF1F6", zeroline=False, tickfont=dict(size=13),
                    title_font=dict(size=14))
     f.update_yaxes(gridcolor="#EEF1F6", zeroline=False, tickfont=dict(size=13),
                    title_font=dict(size=14))
-    if tiene_pie:
+    if mostrar_leyenda:
         f.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.05,
                                     xanchor="center", x=0.5,
                                     font=dict(size=13)))
@@ -153,16 +166,23 @@ def _bloque_html(subtitulo, kpis, figuras, progreso=None,
     else:
         hero_r = f'<div class="hero-r"><div class="cap">{subtitulo}</div></div>'
 
-    # Gráficos como imágenes, en grilla 2 columnas
-    graf_html = ""
-    for tit, img_b64, color in figuras:
-        graf_html += f"""
-          <div class="gcard">
-            <div class="gh" style="border-left-color:{color}">{tit}</div>
-            <img class="gimg" src="{img_b64}" alt="">
-          </div>"""
+    def _grid(figs):
+        h = ""
+        for tit, img_b64, color in figs:
+            h += f"""
+              <div class="gcard">
+                <div class="gh" style="border-left-color:{color}">{tit}</div>
+                <img class="gimg" src="{img_b64}" alt="">
+              </div>"""
+        return h
 
-    return f"""
+    # Primera página: hero + KPIs + hasta 4 gráficos. Si hay más, van en
+    # páginas siguientes con un encabezado ligero (sin repetir KPIs), para
+    # que cada página quede bien armada en vez de dejar huecos.
+    primera = figuras[:4]
+    resto = figuras[4:]
+
+    html = f"""
     <div class="page">
       <div class="hero">
         <div class="hero-l">
@@ -176,8 +196,21 @@ def _bloque_html(subtitulo, kpis, figuras, progreso=None,
       </div>
       {barra_prog}
       <div class="kpis">{kpi_html}</div>
-      <div class="grid">{graf_html}</div>
+      <div class="grid">{_grid(primera)}</div>
     </div>"""
+
+    for i in range(0, len(resto), 4):
+        grupo = resto[i:i+4]
+        html += f"""
+    <div class="page">
+      <div class="subhead">
+        <span class="subhead-mark"></span>
+        BitaLogs · {subtitulo} · continuación
+      </div>
+      <div class="grid">{_grid(grupo)}</div>
+    </div>"""
+
+    return html
 
 
 _CSS = """
@@ -208,6 +241,13 @@ _CSS = """
   .prog{height:9px;border-radius:6px;background:#E6EAF2;overflow:hidden;margin-bottom:12px}
   .prog-bar{height:100%;background:#2563EB;border-radius:6px}
 
+  /* Encabezado ligero para páginas de continuación */
+  .subhead{font-family:'Poppins',Arial,sans-serif;font-weight:700;font-size:15px;
+           color:#1B2436;display:flex;align-items:center;gap:10px;
+           margin-bottom:14px;padding-bottom:10px;border-bottom:2px solid #E6EAF2}
+  .subhead-mark{width:24px;height:24px;border-radius:7px;
+                background:linear-gradient(135deg,#3B82F6,#60A5FA);display:inline-block}
+
   /* KPIs con flex, 3+2 centrados */
   .kpis{margin-bottom:12px}
   .kpi-row{display:flex;justify-content:center;gap:12px;margin-bottom:10px}
@@ -220,7 +260,7 @@ _CSS = """
   .kpi .val{font-size:24px;font-weight:800;line-height:1}
   .kpi .lbl{font-size:11px;color:#6B7890;font-weight:600;margin-top:4px}
 
-  /* Grilla de gráficos con flex */
+  /* Grilla de gráficos: 2 columnas con flex */
   .grid{display:flex;flex-wrap:wrap;gap:2%}
   .gcard{width:49%;background:#fff;border:1px solid #E6EAF2;
          border-radius:14px;padding:12px 15px;margin-bottom:12px;

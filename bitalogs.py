@@ -28,6 +28,7 @@ from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 from sqlalchemy import create_engine, text
 
@@ -741,6 +742,44 @@ def construir_bloque_indicadores(fdf, fdf_act, etiqueta, horas_acum, horas_tot):
             fr = px.pie(por_res, names="Estado", values="Cantidad", hole=0.4)
             figuras.append(("Estado de resolucion", fr))
 
+        # 5) y 6) Solo para el reporte de toda la práctica: tendencia de
+        # horas acumuladas (real vs meta) y evolución del tipo por semana.
+        if etiqueta == "Toda la práctica":
+            semanas_lst = cal.lista_semanas()
+            meta_sem = (horas_tot / len(semanas_lst)) if semanas_lst else 0
+            hoy_ref = hoy_hn()
+            filas_t = []
+            for n in semanas_lst:
+                vsem = cal.viernes_de_semana(n)
+                filas_t.append({
+                    "Semana": f"Sem {n}",
+                    "Meta": round(meta_sem * n),
+                    "Real": (cal.horas_hasta(vsem) if vsem <= hoy_ref else None)})
+            tend = pd.DataFrame(filas_t)
+            ftend = go.Figure()
+            ftend.add_trace(go.Scatter(
+                x=tend["Semana"], y=tend["Meta"], name="Meta (400 h)",
+                mode="lines", line=dict(color="#C7D2E8", dash="dash", width=2)))
+            ftend.add_trace(go.Scatter(
+                x=tend["Semana"], y=tend["Real"], name="Avance real",
+                mode="lines+markers", line=dict(color="#0EA5A5", width=3),
+                marker=dict(size=7, color="#0EA5A5"), connectgaps=False))
+            ftend.update_layout(yaxis_title="Horas")
+            figuras.append(("Tendencia de horas acumuladas", ftend))
+
+            evol = (fdf.dropna(subset=["semana"])
+                    .groupby(["semana", "tipo"]).size()
+                    .reset_index(name="Cantidad"))
+            if not evol.empty:
+                evol["Semana"] = evol["semana"].apply(lambda n: f"Sem {n}")
+                fev = px.bar(evol, x="Semana", y="Cantidad", color="tipo",
+                             color_discrete_sequence=["#2563EB", "#0EA5A5",
+                                                      "#7C3AED", "#F59E0B",
+                                                      "#EF4444", "#16A34A"])
+                fev.update_layout(barmode="stack", yaxis_title="Equipos",
+                                  xaxis_title="")
+                figuras.append(("Evolucion del tipo de mantenimiento", fev))
+
     return kpis, figuras
 
 
@@ -1189,11 +1228,18 @@ with tab_dash:
             por_tipo = (fdf.groupby("tipo").size()
                         .rename_axis("Tipo").reset_index(name="Cantidad"))
             ui.encabezado_seccion("Tipo de mantenimiento", ui.PALETA[2])
-            fig2 = px.pie(por_tipo, names="Tipo", values="Cantidad", hole=0.55,
-                          color_discrete_sequence=ui.PALETA)
-            fig2.update_traces(textposition="inside", textinfo="percent")
-            ui.estilizar_figura(fig2, altura=290, leyenda=True)
-            st.plotly_chart(fig2, use_container_width=True)
+            if len(por_tipo) == 1:
+                # Una sola categoría: tarjeta clara en vez de donut "vacío".
+                ui.tarjeta_categoria_unica(por_tipo.iloc[0]["Tipo"],
+                                           color=ui.PALETA[2])
+            elif not por_tipo.empty:
+                fig2 = px.pie(por_tipo, names="Tipo", values="Cantidad",
+                              hole=0.55, color_discrete_sequence=ui.PALETA)
+                fig2.update_traces(textposition="inside", textinfo="percent")
+                ui.estilizar_figura(fig2, altura=290, leyenda=True)
+                st.plotly_chart(fig2, use_container_width=True)
+            else:
+                st.info("Sin datos de mantenimiento para este filtro.")
 
         g3, g4 = st.columns(2)
         with g3:
@@ -1249,6 +1295,59 @@ with tab_dash:
             fig5.update_traces(textposition="outside")
             ui.estilizar_figura(fig5, altura=280, leyenda=False)
             st.plotly_chart(fig5, use_container_width=True)
+
+            # ---- Tendencia de horas acumuladas: real vs meta ----
+            # Responde a la sugerencia de proyectar el cumplimiento de las
+            # 400 h: la meta ideal (lineal) contra el avance real semana
+            # a semana.
+            semanas_lst = cal.lista_semanas()
+            horas_tot_pract = cal.horas_totales_practica()
+            meta_por_sem = horas_tot_pract / len(semanas_lst)
+            hoy_ref = hoy_hn()
+            filas_tend = []
+            for n in semanas_lst:
+                vsem = cal.viernes_de_semana(n)
+                real_val = (cal.horas_hasta(vsem) if vsem <= hoy_ref
+                            else None)
+                filas_tend.append({
+                    "Semana": f"Sem {n}",
+                    "Meta": round(meta_por_sem * n),
+                    "Real": real_val})
+            tend = pd.DataFrame(filas_tend)
+            ui.encabezado_seccion("Tendencia de horas acumuladas",
+                                  ui.PALETA[1])
+            fig_t = go.Figure()
+            fig_t.add_trace(go.Scatter(
+                x=tend["Semana"], y=tend["Meta"], name="Meta (400 h)",
+                mode="lines", line=dict(color="#C7D2E8", dash="dash", width=2)))
+            fig_t.add_trace(go.Scatter(
+                x=tend["Semana"], y=tend["Real"], name="Avance real",
+                mode="lines+markers",
+                line=dict(color=ui.PALETA[1], width=3),
+                marker=dict(size=7, color=ui.PALETA[1]),
+                connectgaps=False))
+            fig_t.update_layout(yaxis_title="Horas")
+            ui.estilizar_figura(fig_t, altura=300, leyenda=True)
+            st.plotly_chart(fig_t, use_container_width=True)
+
+            # ---- Evolución del tipo de mantenimiento por semana ----
+            # Barras apiladas: muestra si se está pasando de correctivo
+            # (reactivo) a preventivo con el paso de las semanas.
+            evol = (fdf.dropna(subset=["semana"])
+                    .groupby(["semana", "tipo"]).size()
+                    .reset_index(name="Cantidad"))
+            if not evol.empty:
+                evol["Semana"] = evol["semana"].apply(lambda n: f"Sem {n}")
+                ui.encabezado_seccion(
+                    "Evolución del tipo de mantenimiento", ui.PALETA[2])
+                fig_ev = px.bar(
+                    evol, x="Semana", y="Cantidad", color="tipo",
+                    color_discrete_sequence=ui.PALETA,
+                    labels={"tipo": "Tipo", "Cantidad": "Equipos"})
+                fig_ev.update_layout(barmode="stack", yaxis_title="Equipos",
+                                     xaxis_title="")
+                ui.estilizar_figura(fig_ev, altura=300, leyenda=True)
+                st.plotly_chart(fig_ev, use_container_width=True)
 
         # ---- Reporte PDF (dashboard, imprimible) ----
         st.divider()
