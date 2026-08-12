@@ -1368,12 +1368,21 @@ with tab_dash:
                 with st.spinner("Generando PDF..."):
                     kpis_pdf, figuras_pdf = construir_bloque_indicadores(
                         fdf, fdf_act, etiqueta_periodo, horas_acum, horas_tot)
+                    # Comentarios sensibles al filtro: si es una semana,
+                    # solo los de esa semana; si es toda la práctica, todos.
+                    _dcom = load_comentarios()
+                    if modo == "Semana" and sem_sel:
+                        _dcom = _dcom[_dcom["semana"] == sem_sel]
+                    coment_pdf = _dcom.sort_values(
+                        ["semana", "fecha_registro"]).rename(columns={
+                            "fecha_registro": "fecha"}).to_dict("records")
                     pdf_bytes = construir_pdf(
                         titulo="BitaLogs - Reporte de Indicadores",
                         subtitulo=etiqueta_periodo,
                         kpis=kpis_pdf, figuras=figuras_pdf,
                         progreso=horas_acum / horas_tot * 100 if horas_tot else 0,
-                        horas_acum=horas_acum, horas_tot=horas_tot)
+                        horas_acum=horas_acum, horas_tot=horas_tot,
+                        comentarios=coment_pdf)
                 st.download_button(
                     "📥 Descargar PDF", data=pdf_bytes,
                     file_name=f"BitaLogs_{etiqueta_periodo.replace(' ', '_')}.pdf",
@@ -1388,6 +1397,7 @@ with tab_dash:
                     df_act_full = load_actividades_extra()
                     df_act_full["_fecha"] = pd.to_datetime(
                         df_act_full.get("fecha"), errors="coerce")
+                    coment_full = load_comentarios()
                     bloques = []
                     for s in cal.lista_semanas():
                         sub = df_full[df_full["semana"] == s] if not df_full.empty else df_full
@@ -1398,11 +1408,18 @@ with tab_dash:
                         h_acum = cal.horas_hasta(cal.viernes_de_semana(s))
                         kpis_s, figs_s = construir_bloque_indicadores(
                             sub, sub_act, f"Semana {s}", h_acum, horas_tot)
+                        # Comentarios de esta semana
+                        com_s = (coment_full[coment_full["semana"] == s]
+                                 if not coment_full.empty else coment_full)
+                        com_s = com_s.rename(columns={
+                            "fecha_registro": "fecha"}).to_dict("records") \
+                            if not com_s.empty else []
                         bloques.append({
                             "subtitulo": f"Semana {s}",
                             "kpis": kpis_s, "figuras": figs_s,
                             "progreso": h_acum / horas_tot * 100 if horas_tot else 0,
-                            "horas_acum": h_acum, "horas_tot": horas_tot})
+                            "horas_acum": h_acum, "horas_tot": horas_tot,
+                            "comentarios": com_s})
 
                     if not bloques:
                         st.warning("No hay datos registrados en ninguna semana.")

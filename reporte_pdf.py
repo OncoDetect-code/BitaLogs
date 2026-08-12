@@ -128,7 +128,7 @@ _ACENTOS_BG = ["#E0EBFF", "#D7F5F2", "#FEE2E2", "#EDE4FF", "#FEF0CF"]
 
 
 def _bloque_html(subtitulo, kpis, figuras, progreso=None,
-                 horas_acum=None, horas_tot=None):
+                 horas_acum=None, horas_tot=None, comentarios=None):
     """HTML de un bloque (una página) con hero, KPIs y grilla de gráficos."""
     logo = (f'<img src="{_LOGO}" alt="">' if _LOGO else "")
     iconos = _iconos_kpi()
@@ -181,6 +181,7 @@ def _bloque_html(subtitulo, kpis, figuras, progreso=None,
     # que cada página quede bien armada en vez de dejar huecos.
     primera = figuras[:4]
     resto = figuras[4:]
+    coment_html = _seccion_comentarios(comentarios or [])
 
     html = f"""
     <div class="page">
@@ -197,10 +198,14 @@ def _bloque_html(subtitulo, kpis, figuras, progreso=None,
       {barra_prog}
       <div class="kpis">{kpi_html}</div>
       <div class="grid">{_grid(primera)}</div>
+      {coment_html if not resto else ""}
     </div>"""
 
-    for i in range(0, len(resto), 4):
-        grupo = resto[i:i+4]
+    grupos = [resto[i:i+4] for i in range(0, len(resto), 4)]
+    for idx_g, grupo in enumerate(grupos):
+        # Los comentarios van pegados al último grupo de gráficos, para
+        # aprovechar el espacio restante de esa página.
+        es_ultimo = (idx_g == len(grupos) - 1)
         html += f"""
     <div class="page">
       <div class="subhead">
@@ -208,6 +213,7 @@ def _bloque_html(subtitulo, kpis, figuras, progreso=None,
         BitaLogs · {subtitulo} · continuación
       </div>
       <div class="grid">{_grid(grupo)}</div>
+      {coment_html if es_ultimo else ""}
     </div>"""
 
     return html
@@ -268,11 +274,83 @@ _CSS = """
   .gh{font-size:14px;font-weight:700;margin-bottom:7px;padding-left:10px;
       border-left:5px solid #2563EB;line-height:1.2}
   .gimg{width:100%;height:auto;display:block}
+
+  /* Sección de comentarios de evaluadores */
+  .coment-sec{margin-top:6px}
+  .coment{background:#fff;border:1px solid #E6EAF2;border-radius:12px;
+          padding:12px 15px;margin-bottom:9px;page-break-inside:avoid}
+  .coment-top{display:flex;justify-content:space-between;align-items:baseline;
+              margin-bottom:5px}
+  .coment-nom{font-family:'Poppins',Arial,sans-serif;font-weight:700;
+              font-size:13px;color:#1B2436}
+  .coment-meta{font-size:10.5px;color:#6B7890;font-weight:600;
+               text-transform:uppercase;letter-spacing:.3px}
+  .coment-txt{font-size:12px;color:#3A4560;line-height:1.5}
 """
 
 
 def _html_completo(cuerpo):
     return f"<!DOCTYPE html><html><head><meta charset='utf-8'><style>{_CSS}</style></head><body>{cuerpo}</body></html>"
+
+
+def _fmt_fecha(valor):
+    """
+    Convierte una fecha guardada como ISO (2026-08-05T14:30) a un formato
+    legible en español (5 ago 2026, 14:30). Si no puede parsearla, la
+    devuelve tal cual.
+    """
+    if not valor:
+        return ""
+    s = str(valor).strip()
+    meses = ["ene", "feb", "mar", "abr", "may", "jun",
+             "jul", "ago", "sep", "oct", "nov", "dic"]
+    from datetime import datetime as _dt
+    for fmt in ("%Y-%m-%dT%H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M",
+                "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            d = _dt.strptime(s, fmt)
+            base = f"{d.day} {meses[d.month-1]} {d.year}"
+            if "%H" in fmt:
+                return f"{base}, {d.hour:02d}:{d.minute:02d}"
+            return base
+        except ValueError:
+            continue
+    return s
+
+
+def _seccion_comentarios(comentarios):
+    """
+    HTML de la sección de comentarios de evaluadores. `comentarios` es una
+    lista de dicts con claves: evaluador, fecha, semana, comentario.
+    Devuelve '' si no hay comentarios.
+    """
+    if not comentarios:
+        return ""
+    tarjetas = ""
+    for c in comentarios:
+        evaluador = str(c.get("evaluador", "") or "").strip() or "Evaluador"
+        fecha = _fmt_fecha(c.get("fecha", ""))
+        semana = c.get("semana", "")
+        texto = str(c.get("comentario", "") or "").strip()
+        meta = f"Semana {semana}" + (f" · {fecha}" if fecha else "")
+        tarjetas += f"""
+          <div class="coment">
+            <div class="coment-top">
+              <span class="coment-nom">{evaluador}</span>
+              <span class="coment-meta">{meta}</span>
+            </div>
+            <div class="coment-txt">{texto}</div>
+          </div>"""
+    return f"""
+      <div class="coment-sec">
+        <div class="subhead">
+          <span class="subhead-mark"></span>
+          Comentarios de los evaluadores
+        </div>
+        {tarjetas}
+      </div>"""
+    base = ["#0EA5A5", "#2563EB", "#7C3AED", "#16A34A", "#F59E0B", "#0891B2"]
+    return [base[i % len(base)] for i in range(n)]
 
 
 def _colores_secciones(n):
@@ -291,10 +369,10 @@ def _prep_figuras(figuras):
 
 
 def construir_pdf(titulo, subtitulo, kpis, figuras, progreso=None,
-                  horas_acum=None, horas_tot=None):
+                  horas_acum=None, horas_tot=None, comentarios=None):
     figs = _prep_figuras(figuras)
     cuerpo = _bloque_html(subtitulo, kpis, figs, progreso,
-                          horas_acum, horas_tot)
+                          horas_acum, horas_tot, comentarios)
     html = _html_completo(cuerpo)
     return HTML(string=html).write_pdf()
 
@@ -305,6 +383,7 @@ def construir_pdf_multi(titulo, bloques):
         figs = _prep_figuras(b.get("figuras", []))
         cuerpo += _bloque_html(b.get("subtitulo", ""), b.get("kpis", {}),
                                figs, b.get("progreso"),
-                               b.get("horas_acum"), b.get("horas_tot"))
+                               b.get("horas_acum"), b.get("horas_tot"),
+                               b.get("comentarios"))
     html = _html_completo(cuerpo)
     return HTML(string=html).write_pdf()
