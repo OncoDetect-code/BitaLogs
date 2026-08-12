@@ -39,6 +39,7 @@ from matriz_excel import matriz_xlsx_bytes
 import ui_dashboard as ui
 from reporte_pdf import construir_pdf, construir_pdf_multi
 from splash import mostrar_splash
+import ai_extract
 
 # Honduras usa UTC-6 todo el año (sin horario de verano). En Streamlit
 # Cloud el servidor corre en UTC, así que date.today() daría el día
@@ -787,20 +788,94 @@ def construir_bloque_indicadores(fdf, fdf_act, etiqueta, horas_acum, horas_tot):
 with tab_input:
     st.subheader("Registrar una atención a equipo")
 
+    # ---- Carga desde foto con IA (pre-rellena el formulario) ----
+    # Los valores extraídos se guardan en session_state y el formulario de
+    # abajo los usa como valores por defecto, para que puedas revisarlos y
+    # editarlos antes de guardar.
+    _AI = st.session_state.setdefault("ai_pre", {})
+
+    with st.expander("📷 Cargar desde foto (IA) — rellena el formulario automáticamente"):
+        st.caption("Sube una foto o PDF del reporte y la IA extraerá los "
+                   "datos para que los revises abajo antes de guardar.")
+        ai_file = st.file_uploader(
+            "Foto o PDF del reporte", type=["jpg", "jpeg", "png", "webp", "pdf"],
+            key="ai_upload", accept_multiple_files=False)
+        if st.button("Extraer datos con IA", key="btn_ai",
+                     disabled=ai_file is None):
+            api_key = st.secrets.get("GEMINI_API_KEY", "")
+            if not api_key:
+                st.error("Falta la clave GEMINI_API_KEY en los secretos de la "
+                         "app. Agrégala en .streamlit/secrets.toml (es la misma "
+                         "de ServiDox).")
+            else:
+                try:
+                    with st.spinner("Leyendo el reporte con IA..."):
+                        contenido = ai_file.getvalue()
+                        datos, mime = ai_extract.preparar_archivo(
+                            ai_file.name, contenido)
+                        extraido = ai_extract.extraer_de_imagen(
+                            datos, mime, api_key)
+                    st.session_state["ai_pre"] = extraido
+                    st.success("Datos extraídos. Revísalos abajo, corrige lo "
+                               "que haga falta y guarda.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"No se pudo extraer: {e}")
+        if _AI:
+            if st.button("Limpiar datos extraídos", key="btn_ai_clear"):
+                st.session_state["ai_pre"] = {}
+                st.rerun()
+
+    # Helpers para valores por defecto: si la IA extrajo algo, se usa; si no,
+    # el valor normal.
+    def _pre_txt(campo):
+        return _AI.get(campo, "") or ""
+
+    def _pre_idx(campo, opciones, default=0):
+        val = _AI.get(campo, "")
+        return opciones.index(val) if val in opciones else default
+
+    def _pre_fecha():
+        val = _AI.get("fecha", "")
+        if val:
+            try:
+                return date.fromisoformat(val)
+            except ValueError:
+                pass
+        return hoy_hn()
+
+    def _pre_hora(campo, default):
+        val = _AI.get(campo, "")
+        if val:
+            try:
+                h, m = val.split(":")[:2]
+                return time(int(h), int(m))
+            except (ValueError, IndexError):
+                pass
+        return default
+
     with st.form("nueva", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
         with c1:
-            f_fecha = st.date_input("Fecha", value=hoy_hn())
-            f_area = st.selectbox("Área", AREAS)
-            f_tipo = st.selectbox("Tipo de mantenimiento", TIPOS)
+            f_fecha = st.date_input("Fecha", value=_pre_fecha())
+            f_area = st.selectbox("Área", AREAS,
+                                  index=_pre_idx("area", AREAS))
+            f_tipo = st.selectbox("Tipo de mantenimiento", TIPOS,
+                                  index=_pre_idx("tipo", TIPOS))
         with c2:
-            f_equipo = st.text_input("Equipo", placeholder="Lámpara cielítica")
-            f_marca = st.text_input("Marca", placeholder="Dräger")
-            f_modelo = st.text_input("Modelo", placeholder="Polaris 100")
+            f_equipo = st.text_input("Equipo", value=_pre_txt("equipo"),
+                                     placeholder="Lámpara cielítica")
+            f_marca = st.text_input("Marca", value=_pre_txt("marca"),
+                                    placeholder="Dräger")
+            f_modelo = st.text_input("Modelo", value=_pre_txt("modelo"),
+                                     placeholder="Polaris 100")
         with c3:
-            f_serie = st.text_input("Serie No.", placeholder="ABC123")
-            f_ini = st.time_input("Hora de inicio", value=time(8, 0))
-            f_fin = st.time_input("Hora de finalización", value=time(9, 0))
+            f_serie = st.text_input("Serie No.", value=_pre_txt("serie"),
+                                    placeholder="ABC123")
+            f_ini = st.time_input("Hora de inicio",
+                                  value=_pre_hora("hora_inicio", time(8, 0)))
+            f_fin = st.time_input("Hora de finalización",
+                                  value=_pre_hora("hora_fin", time(9, 0)))
 
         # Semana y Día EDITABLES. Se sugieren desde la fecha, pero podés
         # corregirlos (p.ej. si cargás hoy un registro que era de ayer).
@@ -818,14 +893,19 @@ with tab_input:
                 format_func=lambda d: f"Día {d}",
                 help="Corrige el día si lo cargas con retraso.")
 
-        f_prob = st.text_area("Problema identificado", height=80)
-        f_sol = st.text_area("Solución sugerida / trabajo realizado", height=80)
+        f_prob = st.text_area("Problema identificado",
+                              value=_pre_txt("problema"), height=80)
+        f_sol = st.text_area("Solución sugerida / trabajo realizado",
+                             value=_pre_txt("solucion"), height=80)
 
         cc1, cc2 = st.columns([1, 3])
         with cc1:
-            f_res = st.selectbox("¿Resuelto?", RESUELTO)
-        f_imp = st.text_area("Impacto esperado o beneficio real", height=70)
-        f_obs = st.text_area("Observaciones", height=70)
+            f_res = st.selectbox("¿Resuelto?", RESUELTO,
+                                 index=_pre_idx("resuelto", RESUELTO))
+        f_imp = st.text_area("Impacto esperado o beneficio real",
+                             value=_pre_txt("impacto"), height=70)
+        f_obs = st.text_area("Observaciones",
+                             value=_pre_txt("observaciones"), height=70)
 
         # Hasta 4 imágenes JPEG que se mostrarán en "Mostrar Bitácoras"
         f_imgs = st.file_uploader(
@@ -873,6 +953,10 @@ with tab_input:
                 extra = f" con {n_fotos} imagen(es)" if n_fotos else ""
                 st.success(f"✅ Atención registrada (Semana {f_semana}, "
                            f"Día {f_dia}{extra}).")
+                # Limpiar los datos pre-rellenados por la IA para el próximo
+                # registro.
+                if st.session_state.get("ai_pre"):
+                    st.session_state["ai_pre"] = {}
 
     # -------------------------------------------- Otras actividades (sin equipo)
     st.divider()
