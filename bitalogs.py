@@ -794,9 +794,10 @@ with tab_input:
     # editarlos antes de guardar.
     _AI = st.session_state.setdefault("ai_pre", {})
 
-    with st.expander("📷 Cargar desde foto (IA) — rellena el formulario automáticamente"):
-        st.caption("Sube una foto o PDF del reporte y la IA extraerá los "
-                   "datos para que los revises abajo antes de guardar.")
+    with st.expander("📷 Cargar desde foto (IA)"):
+        st.caption("Al subir una foto o PDF del reporte, la IA extrae los "
+                   "datos y rellena el formulario para revisarlos antes de "
+                   "guardar.")
         ai_file = st.file_uploader(
             "Foto o PDF del reporte", type=["jpg", "jpeg", "png", "webp", "pdf"],
             key="ai_upload", accept_multiple_files=False)
@@ -816,8 +817,9 @@ with tab_input:
                         extraido = ai_extract.extraer_de_imagen(
                             datos, mime, api_key)
                     st.session_state["ai_pre"] = extraido
-                    st.success("Datos extraídos. Revísalos abajo, corrige lo "
-                               "que haga falta y guarda.")
+                    st.success("Datos extraídos. Quedan cargados en el "
+                               "formulario para revisión y ajuste antes de "
+                               "guardar.")
                     st.rerun()
                 except Exception as e:
                     st.error(f"No se pudo extraer: {e}")
