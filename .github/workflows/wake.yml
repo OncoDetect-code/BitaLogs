@@ -1,0 +1,29 @@
+name: Mantener apps despiertas
+
+# Ejecuta cada 4 horas para evitar que BitaLogs y ServiDox se duerman
+# (Streamlit Cloud las duerme tras 12 h sin tráfico real).
+on:
+  schedule:
+    - cron: "0 */4 * * *"   # cada 4 horas (UTC)
+  workflow_dispatch:          # permite ejecutarlo a mano desde GitHub
+
+jobs:
+  despertar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Descargar el repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar Selenium
+        run: pip install selenium
+
+      # ubuntu-latest ya trae Chrome y chromedriver preinstalados, así que
+      # Selenium los usa directamente sin pasos extra.
+      - name: Despertar las apps
+        run: python wake_apps.py
