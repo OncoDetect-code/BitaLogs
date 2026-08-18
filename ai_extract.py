@@ -31,6 +31,7 @@ CAMPOS_EXTRAIBLES = [
 _AREAS = ("Hospitalización A", "Hospitalización B", "UCI A", "UCI B",
           "Sala Cuna", "UCIN", "Emergencia", "CEYE", "Laboratorio",
           "Quirófano 1", "Quirófano 2", "Quirófano 3", "Quirófano 4",
+          "Maternidad", "Diagnóstico por imágenes",
           "Área de mantenimiento", "HDV La Lima", "Otra")
 _TIPOS = ("Preventivo", "Correctivo", "Revisión y Diagnóstico",
           "Instalación", "Capacitación", "Otro")
