@@ -1362,9 +1362,11 @@ with tab_dash:
                 fig4 = px.bar(por_dur, x="Rango", y="Atenciones",
                               text="Atenciones",
                               color_discrete_sequence=[ui.PALETA[6]])
-                fig4.update_traces(textposition="outside")
+                fig4.update_traces(textposition="outside", cliponaxis=False)
+                _max4 = por_dur["Atenciones"].max()
                 fig4.update_layout(xaxis_title="Minutos",
-                                   yaxis_title="Atenciones")
+                                   yaxis_title="Atenciones",
+                                   yaxis_range=[0, (_max4 * 1.18) if _max4 else 1])
                 ui.estilizar_figura(fig4, altura=290, leyenda=False)
                 st.plotly_chart(fig4, use_container_width=True)
             else:
@@ -1379,7 +1381,10 @@ with tab_dash:
             ui.encabezado_seccion("Equipos atendidos por semana", ui.PALETA[1])
             fig5 = px.bar(por_sem, x="Semana", y="Equipos", text="Equipos",
                           color_discrete_sequence=[ui.PALETA[1]])
-            fig5.update_traces(textposition="outside")
+            fig5.update_traces(textposition="outside", cliponaxis=False)
+            _max5 = por_sem["Equipos"].max()
+            fig5.update_layout(
+                yaxis_range=[0, (_max5 * 1.18) if _max5 else 1])
             ui.estilizar_figura(fig5, altura=280, leyenda=False)
             st.plotly_chart(fig5, use_container_width=True)
 
