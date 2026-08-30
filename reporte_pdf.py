@@ -38,30 +38,21 @@ try:
 except Exception:
     _LOGO = ""
 
+
 def _fig_img_b64(fig, w=820, h=500, tipo="bar"):
     """Rasteriza una figura Plotly a PNG y la devuelve como data-URI."""
     f = _estilizar(fig, tipo)
     
     try:
-        # Intentar con write_image
+        # Usar write_image con archivo temporal (más estable en Streamlit Cloud)
         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
             pio.write_image(f, tmp.name, width=w, height=h, scale=2, engine='kaleido')
             with open(tmp.name, 'rb') as f_img:
                 png = f_img.read()
             os.unlink(tmp.name)
     except:
-        try:
-            # Fallback a to_image
-            png = f.to_image(format="png", width=w, height=h, scale=2)
-        except:
-            # Si todo falla, crear una imagen simple con PIL
-            from PIL import Image, ImageDraw
-            img = Image.new('RGB', (int(w), int(h)), color='#f0f0f0')
-            draw = ImageDraw.Draw(img)
-            draw.text((w//4, h//2), "Gráfico temporalmente no disponible", fill='#666')
-            buf = BytesIO()
-            img.save(buf, format='png')
-            png = buf.getvalue()
+        # Si falla, usar el método original
+        png = f.to_image(format="png", width=w, height=h, scale=2)
     
     return "data:image/png;base64," + base64.b64encode(png).decode()
 
