@@ -41,21 +41,24 @@ except Exception:
 
 def _fig_img_b64(fig, w=820, h=500, tipo="bar"):
     """Rasteriza una figura Plotly a PNG y la devuelve como data-URI."""
+    import tempfile
+    import os
+    import base64
+    
     f = _estilizar(fig, tipo)
     
     try:
-        # Usar write_image con archivo temporal (más estable en Streamlit Cloud)
+        # Método 1: write_image con archivo temporal (más estable)
         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
             pio.write_image(f, tmp.name, width=w, height=h, scale=2, engine='kaleido')
             with open(tmp.name, 'rb') as f_img:
                 png = f_img.read()
             os.unlink(tmp.name)
     except:
-        # Si falla, usar el método original
+        # Método 2: Fallback a to_image
         png = f.to_image(format="png", width=w, height=h, scale=2)
     
     return "data:image/png;base64," + base64.b64encode(png).decode()
-
 
 def _estilizar(fig, tipo):
     """Aplica el look del dashboard a la figura antes de rasterizar."""
