@@ -1,26 +1,6 @@
 """
 BitaLogs - Dashboard de rendimiento de práctica profesional.
 Ingeniería Biomédica · UNITEC · Autor: Luis
-
-Basado en la estructura de ServiDox, adaptado para medir el rendimiento
-del practicante: equipos atendidos, tipo de mantenimiento, área, horas
-acumuladas, duración y promedio de atención, con carga de la bitácora
-institucional (Matriz de impacto) y comentarios semanales de evaluadores.
-
-CÓMO CORRERLO (terminal de Windows, una sola vez):
-    pip install -r requirements.txt
-    python -m streamlit run bitalogs.py
-
-Se abre en el navegador (http://localhost:8501).
-
-BASE DE DATOS (PostgreSQL / Supabase):
-La conexión se lee de st.secrets["DB_URL"]. En local, crea el archivo
-.streamlit/secrets.toml con:
-
-    DB_URL = "postgresql+psycopg2://postgres.xxxx:TU_PASSWORD@aws-0-...:6543/postgres"
-
-En Streamlit Cloud, ese mismo valor se pega en Settings -> Secrets.
-Las tablas se crean solas la primera vez (init_db).
 """
 
 from datetime import date, datetime, time, timezone, timedelta
@@ -37,18 +17,49 @@ from importar_bitacora import leer_matriz
 from formato_bitacora import bitacora_html
 from matriz_excel import matriz_xlsx_bytes
 import ui_dashboard as ui
-from reporte_pdf import construir_pdf, construir_pdf_multi
+from reporte_pdf import construir_pdf, construir_pdf_multi, _bloque_html, _html_completo, _prep_figuras
 from splash import mostrar_splash
 import ai_extract
 
-# Honduras usa UTC-6 todo el año (sin horario de verano). En Streamlit
-# Cloud el servidor corre en UTC, así que date.today() daría el día
-# equivocado; hoy_hn() devuelve la fecha real de Honduras.
+# Honduras usa UTC-6 todo el año (sin horario de verano).
 _TZ_HN = timezone(timedelta(hours=-6))
 
 
 def hoy_hn() -> date:
     return datetime.now(_TZ_HN).date()
+
+# ========================================
+# FUNCIONES PARA REPORTE HTML (IMPRIMIR PDF) - DEFINIDAS AL PRINCIPIO
+# ========================================
+
+def generar_html_reporte(titulo, bloques):
+    """Genera un HTML completo del reporte para visualizar en el navegador."""
+    cuerpo = ""
+    for b in bloques:
+        figs = _prep_figuras(b.get("figuras", []))
+        cuerpo += _bloque_html(
+            b.get("subtitulo", ""), 
+            b.get("kpis", {}),
+            figs, 
+            b.get("progreso"),
+            b.get("horas_acum"), 
+            b.get("horas_tot"),
+            b.get("comentarios")
+        )
+    return _html_completo(cuerpo)
+
+
+def mostrar_reporte_html(titulo, bloques):
+    """Muestra el reporte en una página HTML para imprimir como PDF."""
+    html_completo = generar_html_reporte(titulo, bloques)
+    st.components.v1.html(html_completo, height=900, scrolling=True)
+    st.info("""
+    📄 **Para guardar como PDF:**
+    1. Haz clic derecho en el reporte → **Imprimir** (o Ctrl+P / Cmd+P)
+    2. En **Destino**, selecciona **"Guardar como PDF"**
+    3. En **Más configuraciones**, elige **Tamaño: A4** y **Márgenes: Predeterminados**
+    4. Haz clic en **Guardar**
+    """)
 
 # ------------------------------------------------------------- Catálogos
 AREAS = ["Hospitalización A", "Hospitalización B", "UCI A", "UCI B",
@@ -63,7 +74,6 @@ TIPOS_ACTIVIDAD_EXTRA = ["Visita técnica", "Infografía / material educativo",
                         "Protocolo", "Revisión de equipos (sin mantenimiento)",
                         "Reunión / capacitación recibida", "Otro"]
 
-# Nombres bonitos de columnas (mostrar y exportar)
 COLS = {
     "id": "ID", "fecha": "Fecha", "semana": "Semana", "dia": "Día",
     "hora_inicio": "Inicio", "hora_fin": "Fin", "duracion_min": "Duración (min)",
@@ -81,12 +91,6 @@ COLS_EDIT = ["fecha", "hora_inicio", "hora_fin", "area", "equipo", "marca",
 # ------------------------------------------------------------- DB layer
 @st.cache_resource
 def get_engine():
-    """
-    Motor SQLAlchemy hacia PostgreSQL (Supabase). La URL vive en
-    st.secrets["DB_URL"]. pool_pre_ping evita conexiones muertas del
-    pooler; prepare_threshold=None desactiva los prepared statements
-    que chocan con el pooler de Supabase (puerto 6543).
-    """
     url = st.secrets["DB_URL"]
     return create_engine(url, pool_pre_ping=True,
                          connect_args={"prepare_threshold": None})
@@ -114,10 +118,6 @@ def init_db():
                 fecha_registro TEXT NOT NULL
             )
         """))
-        # Actividades que NO son mantenimiento de un equipo puntual
-        # (visitas, infografías, protocolos, reuniones...). Se registran
-        # aparte porque no tienen "equipo/marca/serie", solo tiempo
-        # invertido. Tabla nueva -> no afecta nada de 'atenciones'.
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS actividades_extra (
                 id SERIAL PRIMARY KEY,
@@ -128,15 +128,12 @@ def init_db():
                 horas REAL NOT NULL
             )
         """))
-        # Columnas para hasta 4 imágenes (base64). ADD COLUMN IF NOT EXISTS
-        # es seguro: no toca datos existentes ni falla si ya están.
         for i in (1, 2, 3, 4):
             conn.execute(text(
                 f"ALTER TABLE atenciones ADD COLUMN IF NOT EXISTS img{i} TEXT"))
 
 
 def _dur_min(hi: str, hf: str):
-    """Minutos entre hora_inicio y hora_fin (HH:MM). None si falta o inválido."""
     try:
         a = datetime.strptime(hi, "%H:%M")
         b = datetime.strptime(hf, "%H:%M")
@@ -147,21 +144,13 @@ def _dur_min(hi: str, hf: str):
 
 
 def _img_a_base64(archivo, max_lado: int = 1000, calidad: int = 72):
-    """
-    Convierte una imagen subida (JPEG/PNG) a un data-URI base64 comprimido,
-    listo para guardar en la base y mostrar en HTML. Redimensiona el lado
-    mayor a max_lado px para no inflar la base de datos. Devuelve None si
-    el archivo no es válido.
-    """
     import base64
     import io
     try:
         from PIL import Image
         im = Image.open(archivo)
-        # Convertir a RGB (por si viene con transparencia o modo raro)
         if im.mode not in ("RGB", "L"):
             im = im.convert("RGB")
-        # Redimensionar manteniendo proporción
         w, h = im.size
         if max(w, h) > max_lado:
             escala = max_lado / max(w, h)
@@ -213,7 +202,6 @@ def load_atenciones() -> pd.DataFrame:
 
 
 def insert_actividad_extra(d: dict):
-    """Guarda una actividad que no es mantenimiento de equipo (solo tiempo)."""
     with get_engine().begin() as conn:
         conn.execute(text("""
             INSERT INTO actividades_extra
@@ -236,14 +224,6 @@ def delete_actividad_extra(id_: int):
 
 
 def normalizar_tipo_actividad(texto: str) -> str:
-    """
-    Cuando el usuario escribe libremente el nombre de una actividad
-    (opción 'Otro'), busca si ya existe una actividad igual -sin
-    importar mayúsculas/minúsculas ni espacios extra- entre las
-    categorías fijas y las ya guardadas en la base, y devuelve esa
-    misma forma para que el gráfico las sume juntas en un solo
-    registro en vez de crear una categoría duplicada.
-    """
     texto = (texto or "").strip()
     if not texto:
         return "Otro"
@@ -260,11 +240,6 @@ def normalizar_tipo_actividad(texto: str) -> str:
 
 
 def update_actividades_extra_from_df(df_edit: pd.DataFrame):
-    """
-    Aplica los cambios del editor de 'Otra actividad' (edición y
-    borrado de filas), igual que se hace con las atenciones: por id,
-    sin recrear toda la tabla.
-    """
     with get_engine().begin() as conn:
         prev = {row[0] for row in conn.execute(
             text("SELECT id FROM actividades_extra")).fetchall()}
@@ -308,12 +283,6 @@ def update_actividades_extra_from_df(df_edit: pd.DataFrame):
 
 
 def _orden_secuencial(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Agrega una columna 'n' con la numeración amigable: 1, 2, 3... en
-    orden cronológico de la práctica (Semana → Día → hora de inicio →
-    id como desempate), sin importar el id crudo de la base. El id real
-    se conserva intacto para las operaciones internas.
-    """
     if df.empty:
         df = df.copy()
         df["n"] = []
@@ -332,14 +301,6 @@ def _orden_secuencial(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def update_atenciones_from_df(df_edit: pd.DataFrame):
-    """
-    Aplica los cambios del editor SIN borrar toda la tabla, para preservar
-    los id y las imágenes. Para cada fila:
-      - si trae id existente -> UPDATE de sus campos (no toca las imágenes)
-      - si no trae id (fila nueva) -> INSERT
-    Las filas que estaban y ya no aparecen se eliminan.
-    Respeta semana/día editados a mano; si faltan, los deduce de la fecha.
-    """
     campos = ["fecha", "semana", "dia", "hora_inicio", "hora_fin",
               "duracion_min", "area", "equipo", "marca", "modelo", "serie",
               "tipo", "problema", "solucion", "resuelto", "impacto",
@@ -373,7 +334,6 @@ def update_atenciones_from_df(df_edit: pd.DataFrame):
         }
 
     with get_engine().begin() as conn:
-        # ids que existían antes
         prev = {row[0] for row in conn.execute(
             text("SELECT id FROM atenciones")).fetchall()}
         vistos = set()
@@ -393,13 +353,11 @@ def update_atenciones_from_df(df_edit: pd.DataFrame):
                     text(f"UPDATE atenciones SET {set_clause} WHERE id = :id"),
                     {**vals, "id": rid})
             else:
-                # fila nueva: insertar (sin imágenes)
                 cols = ", ".join(campos)
                 ph = ", ".join(f":{c}" for c in campos)
                 conn.execute(
                     text(f"INSERT INTO atenciones ({cols}) VALUES ({ph})"), vals)
 
-        # eliminar las filas que el usuario quitó del editor
         borrar = prev - vistos
         for rid in borrar:
             conn.execute(text("DELETE FROM atenciones WHERE id = :id"),
@@ -412,11 +370,6 @@ def delete_atencion(id_: int):
 
 
 def update_imagenes(id_: int, imgs: list):
-    """
-    Reemplaza las 4 imágenes de un registro existente por su id.
-    imgs es una lista de hasta 4 data-URIs (o None). Los None dejan
-    ese slot vacío. Útil para agregar fotos a registros antiguos.
-    """
     imgs = list(imgs[:4]) + [None] * (4 - len(imgs))
     with get_engine().begin() as conn:
         conn.execute(text("""
@@ -428,12 +381,6 @@ def update_imagenes(id_: int, imgs: list):
 
 
 def reordenar_imagenes(id_: int, nuevo_orden: list):
-    """
-    Reordena las imágenes de un registro según 'nuevo_orden', una lista
-    de data-URIs ya en el orden deseado (los que van primero se muestran
-    primero). Rellena con None hasta 4 slots. No comprime ni recodifica:
-    solo reasigna qué foto ocupa img1..img4.
-    """
     orden = [x for x in nuevo_orden if x and str(x).strip()][:4]
     orden = orden + [None] * (4 - len(orden))
     with get_engine().begin() as conn:
@@ -446,7 +393,6 @@ def reordenar_imagenes(id_: int, nuevo_orden: list):
 
 
 def imagenes_de(id_: int) -> list:
-    """Devuelve las imágenes actuales (data-URIs no vacíos) de un registro."""
     with get_engine().connect() as conn:
         row = conn.execute(text(
             "SELECT img1, img2, img3, img4 FROM atenciones WHERE id = :id"),
@@ -456,7 +402,6 @@ def imagenes_de(id_: int) -> list:
     return [x for x in row if x and str(x).strip()]
 
 
-# ---- Comentarios de evaluadores
 def insert_comentario(semana: int, evaluador: str, comentario: str):
     with get_engine().begin() as conn:
         conn.execute(text("""
@@ -548,15 +493,10 @@ st.set_page_config(page_title="BitaLogs · Práctica Profesional",
                    page_icon=str(_ICONO) if _ICONO.exists() else "📘",
                    layout="wide")
 
-ui.inyectar_estilos()   # estilo visual del dashboard rediseñado
+ui.inyectar_estilos()
 
-# CSS responsive: en desktop mantiene el ancho amplio; en celular fuerza
-# que el contenido ocupe todo el ancho y quede centrado (sin el hueco a
-# la derecha). Se usan selectores fuertes + !important porque Streamlit
-# aplica sus propios anchos que de otro modo ganan.
 st.markdown("""
 <style>
-    /* Desktop: contenido centrado con ancho máximo cómodo */
     .stMainBlockContainer, .block-container,
     section.main > div.block-container {
         max-width: 1400px !important;
@@ -565,8 +505,6 @@ st.markdown("""
         padding-left: 3rem !important;
         padding-right: 3rem !important;
     }
-
-    /* Celular: ocupar TODO el ancho, sin hueco a la derecha */
     @media (max-width: 768px) {
         .stMainBlockContainer, .block-container,
         section.main > div.block-container {
@@ -578,17 +516,14 @@ st.markdown("""
             margin-left: 0 !important;
             margin-right: 0 !important;
         }
-        /* El área principal completa al 100% */
         section.main, .stMain, [data-testid="stMain"] {
             width: 100% !important;
         }
         [data-testid="stAppViewContainer"] {
             width: 100% !important;
         }
-        /* KPIs y título legibles en vertical */
         [data-testid="stMetricValue"] { font-size: 1.4rem !important; }
         h1 { font-size: 1.6rem !important; }
-        /* Tabs con scroll horizontal si no caben */
         [data-testid="stTabs"] [data-baseweb="tab-list"] {
             overflow-x: auto;
             flex-wrap: nowrap;
@@ -597,10 +532,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- Ícono para "Agregar a pantalla de inicio" (Android/iPhone) ---
-# Lee bitalogs_icon.png, lo incrusta como base64 y declara las etiquetas
-# que Chrome/Safari usan para el ícono del acceso directo, más un manifest
-# mínimo para que Android lo trate como app (nombre + logo BitaLogs).
 def _inyectar_icono_movil():
     import base64
     import json
@@ -620,7 +551,6 @@ def _inyectar_icono_movil():
     }
     manifest_uri = ("data:application/manifest+json;base64," +
                     base64.b64encode(json.dumps(manifest).encode()).decode())
-    # Se inyecta en el <head> del documento padre (la app real, no el iframe).
     _components.html(f"""
     <script>
     (function() {{
@@ -645,10 +575,9 @@ def _inyectar_icono_movil():
     </script>
     """, height=0, width=0)
 
-
 _inyectar_icono_movil()
 
-mostrar_splash(st)   # pantalla de carga (~3.5 s) al abrir o recargar
+mostrar_splash(st)
 init_db()
 
 _logo_col, _tit_col = st.columns([1, 9])
@@ -660,7 +589,6 @@ with _tit_col:
     st.caption("Dashboard de Rendimiento · Práctica Profesional Luis Velásquez 21941285 · "
                "Ingeniería Biomédica UNITEC Q3 2026")
 
-# Botón para volver a ver la animación de carga cuando se quiera
 with st.sidebar:
     if st.button("▶️ Ver animación de carga"):
         mostrar_splash(st, forzar=True)
@@ -670,7 +598,6 @@ tab_dash, tab_input, tab_carga, tab_datos, tab_bitacora, tab_coment = st.tabs(
      "🗂️ Datos", "📄 Mostrar Bitácoras", "💬 Comentarios"])
 
 
-# ---------------- helper: preparar df con tipos
 def _prep(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
@@ -680,12 +607,6 @@ def _prep(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def construir_bloque_indicadores(fdf, fdf_act, etiqueta, horas_acum, horas_tot):
-    """
-    Dado un subconjunto ya filtrado de atenciones (fdf) y de actividades
-    extra (fdf_act), arma el dict de KPIs y la lista de (título, figura)
-    para el PDF. Se usa tanto para el reporte de un periodo como para
-    cada semana del reporte compilado 1-10, así los dos salen idénticos.
-    """
     total = len(fdf)
     horas_mant = fdf["duracion_min"].dropna().sum() / 60.0 if not fdf.empty else 0.0
     horas_extra = fdf_act["horas"].dropna().sum() if not fdf_act.empty else 0.0
@@ -701,7 +622,6 @@ def construir_bloque_indicadores(fdf, fdf_act, etiqueta, horas_acum, horas_tot):
 
     figuras = []
 
-    # 1) Distribución de tiempo por tipo de actividad
     extra_por_tipo = (fdf_act.groupby("tipo_actividad")["horas"].sum()
                       if not fdf_act.empty else pd.Series(dtype=float))
     dist = pd.concat([
@@ -719,7 +639,6 @@ def construir_bloque_indicadores(fdf, fdf_act, etiqueta, horas_acum, horas_tot):
         figuras.append(("Distribucion de tiempo", fdist))
 
     if not fdf.empty:
-        # 2) Equipos por área
         por_area = (fdf.groupby("area").size().rename_axis("Área")
                     .reset_index(name="Equipos"))
         por_area = por_area[por_area["Equipos"] > 0]
@@ -728,14 +647,12 @@ def construir_bloque_indicadores(fdf, fdf_act, etiqueta, horas_acum, horas_tot):
             fa.update_layout(xaxis_tickangle=-40)
             figuras.append(("Equipos por area", fa))
 
-        # 3) Tipo de mantenimiento
         por_tipo = (fdf.groupby("tipo").size().rename_axis("Tipo")
                     .reset_index(name="Cantidad"))
         if not por_tipo.empty:
             ft = px.pie(por_tipo, names="Tipo", values="Cantidad", hole=0.4)
             figuras.append(("Tipo de mantenimiento", ft))
 
-        # 4) Estado de resolución
         por_res = (fdf.groupby("resuelto").size()
                    .reindex(RESUELTO, fill_value=0)
                    .rename_axis("Estado").reset_index(name="Cantidad"))
@@ -744,8 +661,6 @@ def construir_bloque_indicadores(fdf, fdf_act, etiqueta, horas_acum, horas_tot):
             fr = px.pie(por_res, names="Estado", values="Cantidad", hole=0.4)
             figuras.append(("Estado de resolucion", fr))
 
-        # 5) y 6) Solo para el reporte de toda la práctica: tendencia de
-        # horas acumuladas (real vs meta) y evolución del tipo por semana.
         if etiqueta == "Toda la práctica":
             semanas_lst = cal.lista_semanas()
             meta_sem = (horas_tot / len(semanas_lst)) if semanas_lst else 0
@@ -788,11 +703,6 @@ def construir_bloque_indicadores(fdf, fdf_act, etiqueta, horas_acum, horas_tot):
 # =============================================================== TAB: Nueva atención
 with tab_input:
     st.subheader("Registrar una atención a equipo")
-
-    # ---- Carga desde foto con IA (pre-rellena el formulario) ----
-    # Los valores extraídos se guardan en session_state y el formulario de
-    # abajo los usa como valores por defecto, para que puedas revisarlos y
-    # editarlos antes de guardar.
     _AI = st.session_state.setdefault("ai_pre", {})
 
     with st.expander("📷 Cargar desde foto (IA)"):
@@ -807,8 +717,7 @@ with tab_input:
             api_key = st.secrets.get("GEMINI_API_KEY", "")
             if not api_key:
                 st.error("Falta la clave GEMINI_API_KEY en los secretos de la "
-                         "app. Agrégala en .streamlit/secrets.toml (es la misma "
-                         "de ServiDox).")
+                         "app.")
             else:
                 try:
                     with st.spinner("Leyendo el reporte con IA..."):
@@ -818,9 +727,7 @@ with tab_input:
                         extraido = ai_extract.extraer_de_imagen(
                             datos, mime, api_key)
                     st.session_state["ai_pre"] = extraido
-                    st.success("Datos extraídos. Quedan cargados en el "
-                               "formulario para revisión y ajuste antes de "
-                               "guardar.")
+                    st.success("Datos extraídos.")
                     st.rerun()
                 except Exception as e:
                     st.error(f"No se pudo extraer: {e}")
@@ -829,8 +736,6 @@ with tab_input:
                 st.session_state["ai_pre"] = {}
                 st.rerun()
 
-    # Helpers para valores por defecto: si la IA extrajo algo, se usa; si no,
-    # el valor normal.
     def _pre_txt(campo):
         return _AI.get(campo, "") or ""
 
@@ -880,8 +785,6 @@ with tab_input:
             f_fin = st.time_input("Hora de finalización",
                                   value=_pre_hora("hora_fin", time(9, 0)))
 
-        # Semana y Día EDITABLES. Se sugieren desde la fecha, pero podés
-        # corregirlos (p.ej. si cargás hoy un registro que era de ayer).
         _sem_sug = cal.semana_de_fecha(f_fecha) or 1
         _dia_sug = cal.dia_de_semana_num(f_fecha) or 1
         s1, s2, _s3 = st.columns([1, 1, 2])
@@ -910,19 +813,16 @@ with tab_input:
         f_obs = st.text_area("Observaciones",
                              value=_pre_txt("observaciones"), height=70)
 
-        # Hasta 4 imágenes JPEG que se mostrarán en "Mostrar Bitácoras"
         f_imgs = st.file_uploader(
             "Evidencia fotográfica (hasta 4 imágenes JPEG)",
             type=["jpg", "jpeg", "png"], accept_multiple_files=True,
-            key="up_imgs",
-            help="Arrastra o selecciona hasta 4 fotos. Se comprimen automáticamente.")
+            key="up_imgs")
 
         enviado = st.form_submit_button("Guardar atención", type="primary")
         if enviado:
             if not f_equipo.strip():
                 st.error("El campo 'Equipo' es obligatorio.")
             else:
-                # Procesar imágenes (máx 4)
                 imgs_b64 = []
                 if f_imgs:
                     for archivo in f_imgs[:4]:
@@ -956,27 +856,20 @@ with tab_input:
                 extra = f" con {n_fotos} imagen(es)" if n_fotos else ""
                 st.success(f"✅ Atención registrada (Semana {f_semana}, "
                            f"Día {f_dia}{extra}).")
-                # Limpiar los datos pre-rellenados por la IA para el próximo
-                # registro.
                 if st.session_state.get("ai_pre"):
                     st.session_state["ai_pre"] = {}
 
-    # -------------------------------------------- Otras actividades (sin equipo)
     st.divider()
     st.subheader("🕒 Otra actividad (no mantenimiento de equipo)")
     st.caption("Para visitas, infografías, protocolos, reuniones u otras "
                "actividades de la práctica que no son la atención puntual "
                "de un equipo: registra solo el tiempo invertido.")
 
-    # El selectbox de tipo va FUERA del form para poder mostrar el campo
-    # libre de "¿Cuál actividad?" de inmediato cuando elige "Otro" (dentro
-    # de un st.form los widgets no reaccionan hasta enviar).
     a_tipo_sel = st.selectbox("Actividad", TIPOS_ACTIVIDAD_EXTRA, key="af_tipo")
     a_otro = ""
     if a_tipo_sel == "Otro":
         a_otro = st.text_input(
-            "¿Cuál actividad? (si coincide con una ya registrada, sus horas "
-            "se suman juntas automáticamente)",
+            "¿Cuál actividad?",
             placeholder="Ej. Auditoría de inventario", key="af_otro")
 
     with st.form("nueva_actividad", clear_on_submit=True):
@@ -1026,12 +919,6 @@ with tab_input:
                 "id": "ID", "fecha": "Fecha", "semana": "Semana", "dia": "Día",
                 "tipo_actividad": "Actividad", "descripcion": "Descripción",
                 "horas": "Horas"})
-            st.caption("Editar cualquier celda y presionar 'Guardar cambios'. "
-                       "Para borrar una fila, seleccionarla con el check de la "
-                       "izquierda y presionar la papelera. Si se escribe en "
-                       "'Actividad' un nombre igual a uno ya existente (aunque "
-                       "cambien mayúsculas o espacios), se fusiona con ese y "
-                       "las horas se suman en el mismo grupo del gráfico.")
             edited_act = st.data_editor(
                 show_a, use_container_width=True, hide_index=True,
                 num_rows="dynamic", key="editor_actividades",
@@ -1056,10 +943,7 @@ with tab_input:
 # =============================================================== TAB: Cargar bitácora
 with tab_carga:
     st.subheader("Cargar bitácora institucional (Matriz de impacto)")
-    st.caption("Permite subir un Excel de la Matriz de impacto (UNITEC). BitaLogs "
-               "detecta semana, día, equipo, problema, solución, ¿resuelto?, "
-               "impacto y observaciones. Luego asignas fecha, horas, área y "
-               "tipo antes de guardar.")
+    st.caption("Permite subir un Excel de la Matriz de impacto (UNITEC).")
 
     up = st.file_uploader("Archivo .xlsx", type=["xlsx"], key="up_bitacora")
     if up is not None:
@@ -1076,7 +960,6 @@ with tab_carga:
             st.success(f"Se detectaron **{len(regs)}** registro(s).")
             prev = pd.DataFrame(regs)
 
-            # Sugerir fecha a partir de semana+día del formato
             def _fecha_sug(row):
                 if row["semana"] and row["dia"]:
                     try:
@@ -1178,7 +1061,6 @@ with tab_dash:
         if ft:
             fdf = fdf[fdf["tipo"].isin(ft)]
 
-        # ---- Horas (se calculan primero para el hero) ----
         hoy = hoy_hn()
         ref = hoy
         if modo == "Semana" and sem_sel:
@@ -1187,11 +1069,8 @@ with tab_dash:
             ref = dia_fecha
         horas_acum = cal.horas_hasta(ref)
         horas_tot = cal.horas_totales_practica()
-        sem_actual = cal.semana_de_fecha(ref) or (
-            cal.TOTAL_SEMANAS if ref >= cal.fin_practica() else 1)
         progreso = horas_acum / horas_tot * 100 if horas_tot else 0
 
-        # Actividades extra (para el KPI de "otras actividades")
         _dfa_hero = load_actividades_extra()
         _dfa_hero["_fecha"] = pd.to_datetime(_dfa_hero.get("fecha"),
                                              errors="coerce")
@@ -1205,7 +1084,6 @@ with tab_dash:
         horas_extra_hero = (_fa["horas"].dropna().sum()
                             if not _fa.empty else 0.0)
 
-        # ---- Hero ----
         if modo == "Semana" and sem_sel:
             _periodo_txt = f"Semana {sem_sel}"
         elif modo == "Día" and dia_fecha is not None:
@@ -1217,13 +1095,7 @@ with tab_dash:
             horas_acum=horas_acum, horas_tot=horas_tot,
             periodo_txt=_periodo_txt, progreso=progreso)
 
-        # ---- KPIs principales ----
         total = len(fdf)
-        equipos_unicos = fdf["equipo"].str.strip().str.lower().nunique()
-        dur_prom = fdf["duracion_min"].dropna().mean()
-        dias_activos = fdf["_fecha"].dt.date.nunique()
-        eq_por_dia = (total / dias_activos) if dias_activos else 0
-
         ui.fila_kpis([
             {"valor": str(total), "label": "Equipos atendidos",
              "icono": "equipos"},
@@ -1237,13 +1109,6 @@ with tab_dash:
              "label": "Progreso", "icono": "tendencia"},
         ])
 
-
-        # ---- Distribución de tiempo por tipo de actividad ----
-        # Combina las horas de mantenimiento de equipo (calculadas de
-        # hora_inicio/hora_fin en 'atenciones') con las horas de otras
-        # actividades (visitas, infografías, etc.) cargadas en
-        # 'actividades_extra', respetando el mismo filtro de Semana/
-        # Día/Toda la práctica que el resto del Dashboard.
         ui.encabezado_seccion("Distribución de tiempo por tipo de actividad",
                               ui.PALETA[1])
 
@@ -1267,9 +1132,7 @@ with tab_dash:
         dist = dist[dist["Horas"] > 0].sort_values("Horas", ascending=True)
 
         if dist.empty:
-            st.info("Aún no hay horas registradas (ni de mantenimiento ni de "
-                    "otras actividades) para este filtro.")
-            fig_dist = None
+            st.info("Aún no hay horas registradas para este filtro.")
         else:
             fig_dist = px.bar(dist, x="Horas", y="Tipo de actividad",
                               orientation="h", text="Horas",
@@ -1295,7 +1158,6 @@ with tab_dash:
                 uniformtext=dict(mode="hide", minsize=10))
             st.plotly_chart(fig_dist, use_container_width=True)
 
-        # ---- Gráficos de rendimiento ----
         g1, g2 = st.columns(2)
         with g1:
             por_area = (fdf.groupby("area").size()
@@ -1304,7 +1166,7 @@ with tab_dash:
             por_area = por_area[por_area["Equipos"] > 0]
             ui.encabezado_seccion("Equipos por área", ui.PALETA[0])
             if por_area.empty:
-                st.info("Aún no hay atenciones con área asignada para mostrar.")
+                st.info("Aún no hay atenciones con área asignada.")
             else:
                 fig = px.bar(por_area, x="Área", y="Equipos",
                              color_discrete_sequence=[ui.PALETA[0]])
@@ -1316,7 +1178,6 @@ with tab_dash:
                         .rename_axis("Tipo").reset_index(name="Cantidad"))
             ui.encabezado_seccion("Tipo de mantenimiento", ui.PALETA[2])
             if len(por_tipo) == 1:
-                # Una sola categoría: tarjeta clara en vez de donut "vacío".
                 ui.tarjeta_categoria_unica(por_tipo.iloc[0]["Tipo"],
                                            color=ui.PALETA[2])
             elif not por_tipo.empty:
@@ -1347,9 +1208,6 @@ with tab_dash:
             dd = fdf.dropna(subset=["duracion_min"])
             ui.encabezado_seccion("Duración de las atenciones", ui.PALETA[6])
             if not dd.empty:
-                # Se agrupa la duración en rangos y se grafica como barras
-                # (no histograma) para que respeten las esquinas redondeadas
-                # del resto del dashboard.
                 bins = [0, 15, 30, 45, 60, 90, 120, 9999]
                 etiquetas = ["0-15", "15-30", "30-45", "45-60",
                              "60-90", "90-120", "120+"]
@@ -1372,7 +1230,6 @@ with tab_dash:
             else:
                 st.info("Sin datos de duración para graficar.")
 
-        # ---- Equipos por semana ----
         if modo == "Toda la práctica":
             por_sem = (fdf.dropna(subset=["semana"]).groupby("semana").size()
                        .reindex(cal.lista_semanas(), fill_value=0)
@@ -1388,10 +1245,6 @@ with tab_dash:
             ui.estilizar_figura(fig5, altura=280, leyenda=False)
             st.plotly_chart(fig5, use_container_width=True)
 
-            # ---- Tendencia de horas acumuladas: real vs meta ----
-            # Responde a la sugerencia de proyectar el cumplimiento de las
-            # 400 h: la meta ideal (lineal) contra el avance real semana
-            # a semana.
             semanas_lst = cal.lista_semanas()
             horas_tot_pract = cal.horas_totales_practica()
             meta_por_sem = horas_tot_pract / len(semanas_lst)
@@ -1422,9 +1275,6 @@ with tab_dash:
             ui.estilizar_figura(fig_t, altura=300, leyenda=True)
             st.plotly_chart(fig_t, use_container_width=True)
 
-            # ---- Evolución del tipo de mantenimiento por semana ----
-            # Barras apiladas: muestra si se está pasando de correctivo
-            # (reactivo) a preventivo con el paso de las semanas.
             evol = (fdf.dropna(subset=["semana"])
                     .groupby(["semana", "tipo"]).size()
                     .reset_index(name="Cantidad"))
@@ -1441,7 +1291,7 @@ with tab_dash:
                 ui.estilizar_figura(fig_ev, altura=300, leyenda=True)
                 st.plotly_chart(fig_ev, use_container_width=True)
 
-        # ---- Reporte PDF (dashboard, imprimible) ----
+        # ---- Reporte (HTML para imprimir como PDF) ----
         st.divider()
         if modo == "Semana" and sem_sel:
             etiqueta_periodo = f"Semana {sem_sel}"
@@ -1452,7 +1302,6 @@ with tab_dash:
 
         st.subheader(f"📄 Reporte: {etiqueta_periodo}")
 
-        # --- Preparar datos para el reporte ---
         kpis_pdf, figuras_pdf = construir_bloque_indicadores(
             fdf, fdf_act, etiqueta_periodo, horas_acum, horas_tot)
 
@@ -1472,7 +1321,6 @@ with tab_dash:
         with cpdf1:
             if st.button("🌐 Ver en navegador (Recomendado)", key="btn_html_report",
                          use_container_width=True):
-                # Preparar bloque para HTML
                 bloques_html = [{
                     "subtitulo": etiqueta_periodo,
                     "kpis": kpis_pdf,
@@ -1571,20 +1419,14 @@ with tab_dash:
 with tab_datos:
     df = load_atenciones()
     st.subheader("Todas las atenciones")
-    st.caption("Se puede editar cualquier celda, incluidas Semana y Día (por si un "
-               "registro se cargó con retraso y quedó en el día equivocado). La "
-               "duración se recalcula de las horas. La papelera borra filas.")
+    st.caption("Se puede editar cualquier celda, incluidas Semana y Día.")
 
     if df.empty:
         st.info("Sin datos todavía.")
     else:
-        # Numeración amigable (1,2,3... por Semana→Día), independiente del id.
         df = _orden_secuencial(df)
-        # Ocultar las columnas de imagen en el editor (son base64 enormes);
-        # se conservan al guardar porque update las preserva desde la BD.
         cols_ocultar = ["img1", "img2", "img3", "img4"]
         show = df.drop(columns=[c for c in cols_ocultar if c in df.columns])
-        # Mostrar 'n' (N°) al frente y ordenar la tabla por esa numeración.
         show = show.sort_values("n")
         cols_front = ["n"] + [c for c in show.columns if c != "n"]
         show = show[cols_front]
@@ -1594,26 +1436,22 @@ with tab_datos:
             key="editor_datos",
             column_config={
                 "N°": st.column_config.NumberColumn(
-                    "N°", disabled=True,
-                    help="Número secuencial de la práctica (no el id interno)."),
+                    "N°", disabled=True),
                 "Área": st.column_config.SelectboxColumn("Área", options=AREAS),
                 "Tipo de mantenimiento": st.column_config.SelectboxColumn(
                     "Tipo de mantenimiento", options=TIPOS),
                 "¿Resuelto?": st.column_config.SelectboxColumn(
                     "¿Resuelto?", options=RESUELTO),
                 "Semana": st.column_config.NumberColumn(
-                    "Semana", min_value=1, max_value=10, step=1,
-                    help="Editable: corrige la semana del registro."),
+                    "Semana", min_value=1, max_value=10, step=1),
                 "Día": st.column_config.NumberColumn(
-                    "Día", min_value=1, max_value=5, step=1,
-                    help="Editable: corrige el día del registro."),
+                    "Día", min_value=1, max_value=5, step=1),
                 "Duración (min)": st.column_config.NumberColumn(
                     "Duración (min)", disabled=True),
             },
         )
         if st.button("💾 Guardar cambios", type="primary", key="save_datos"):
             inv = {v: k for k, v in COLS.items()}
-            # Quitar la columna de numeración amigable (no existe en la BD).
             edited_save = edited.drop(columns=["N°"], errors="ignore")
             update_atenciones_from_df(edited_save.rename(columns=inv))
             st.success("Cambios guardados.")
@@ -1621,13 +1459,11 @@ with tab_datos:
 
         st.divider()
         st.subheader("📷 Agregar o cambiar fotos de un registro")
-        st.caption("Selecciona un registro (incluidos los antiguos) para agregarle "
-                   "hasta 4 fotos. Reemplaza las que tenga.")
+        st.caption("Selecciona un registro para agregarle hasta 4 fotos.")
         df_ord = df.sort_values("n")
         etqs_img = [f"N° {int(r['n'])}  |  {r['fecha']}  |  S{r['semana']}D{r['dia']}"
                     f"  |  {r['area']}  |  {r['equipo']}"
                     for _, r in df_ord.iterrows()]
-        # Mapa etiqueta -> id real de la base
         _map_img = {e: int(r["id"]) for e, (_, r) in zip(etqs_img, df_ord.iterrows())}
         sel_img = st.selectbox("Registro", ["- Selecciona -"] + etqs_img,
                                key="sel_reg_img")
@@ -1635,20 +1471,15 @@ with tab_datos:
             id_img = _map_img[sel_img]
             actuales = imagenes_de(id_img)
             if actuales:
-                st.write(f"Este registro ya tiene **{len(actuales)}** foto(s). "
-                         "El orden de abajo es el que aparece en la bitácora "
-                         "(1 = primera).")
+                st.write(f"Este registro ya tiene **{len(actuales)}** foto(s).")
                 cols_prev = st.columns(4)
                 for i, src in enumerate(actuales):
                     with cols_prev[i]:
                         st.image(src, use_container_width=True)
                         st.caption(f"Posición actual: {i + 1}")
 
-                # ---- Reordenar (#2): asignar nueva posición a cada foto ----
                 if len(actuales) > 1:
                     st.markdown("**↕️ Reordenar fotos**")
-                    st.caption("Elige la nueva posición de cada foto y guarda. "
-                               "Si repites un número, se resuelve por orden.")
                     cols_ord = st.columns(len(actuales))
                     nuevas_pos = []
                     for i, _src in enumerate(actuales):
@@ -1660,8 +1491,6 @@ with tab_datos:
                             nuevas_pos.append(pos)
                     if st.button("💾 Guardar nuevo orden",
                                  key=f"save_orden_{id_img}"):
-                        # Ordenar las fotos por la posición pedida; empates
-                        # se rompen por el orden original (estable).
                         pares = sorted(
                             zip(nuevas_pos, range(len(actuales)), actuales),
                             key=lambda t: (t[0], t[1]))
@@ -1691,14 +1520,13 @@ with tab_datos:
                         if len(nuevas) > 4:
                             st.warning("Solo se guardaron las primeras 4.")
                         update_imagenes(id_img, procesadas)
-                        st.success(f"✅ {len(procesadas)} foto(s) guardadas en "
-                                   f"el registro #{id_img}.")
+                        st.success(f"✅ {len(procesadas)} foto(s) guardadas.")
                         st.rerun()
             with colb2:
                 if actuales and st.button("🗑️ Quitar todas las fotos",
                                           key=f"clear_img_{id_img}"):
                     update_imagenes(id_img, [])
-                    st.success(f"Fotos del registro #{id_img} eliminadas.")
+                    st.success(f"Fotos del registro eliminadas.")
                     st.rerun()
 
         st.divider()
@@ -1723,15 +1551,12 @@ with tab_datos:
 # =============================================================== TAB: Mostrar Bitácoras
 with tab_bitacora:
     st.subheader("📄 Mostrar Bitácoras: Matriz de Impacto")
-    st.caption("Genera la bitácora con el formato institucional a partir de "
-               "los registros. Permite filtrar la tabla y la evidencia "
-               "fotográfica por semana o día antes de descargar el HTML.")
+    st.caption("Genera la bitácora con el formato institucional.")
 
     df_b = load_atenciones()
     if df_b.empty:
-        st.info("Aún no hay registros para mostrar. Agrega atenciones primero.")
+        st.info("Aún no hay registros para mostrar.")
     else:
-        # ---- Filtro de la TABLA ----
         st.markdown("**Ver por**")
         cf1, cf2, cf3 = st.columns([1.2, 1, 1])
         with cf1:
@@ -1751,15 +1576,13 @@ with tab_bitacora:
                     "Día", [1, 2, 3, 4, 5],
                     format_func=lambda d: f"Día {d}", key="bita_dia")
 
-        # ---- Filtro independiente de EVIDENCIA FOTOGRÁFICA ----
         st.markdown("**Evidencia fotográfica**")
         ff1, ff2, ff3 = st.columns([1.2, 1, 1])
         with ff1:
             modo_fotos = st.radio(
                 "Fotos", ["Todas", "Por semana", "Por día", "Sin fotos"],
                 horizontal=True, key="fotos_modo",
-                label_visibility="collapsed",
-                help="Elige qué evidencia fotográfica incluir en la bitácora.")
+                label_visibility="collapsed")
         foto_sem = None
         foto_dia = None
         with ff2:
@@ -1773,7 +1596,6 @@ with tab_bitacora:
                     "Día (fotos)", [1, 2, 3, 4, 5],
                     format_func=lambda d: f"Día {d}", key="foto_dia")
 
-        # ---- Aplicar filtro de la tabla ----
         dff = df_b.copy()
         titulo = "Matriz de Impacto - Toda la práctica"
         if modo == "Semana" and sem_sel:
@@ -1785,9 +1607,6 @@ with tab_bitacora:
 
         dff = dff.sort_values(["semana", "dia", "id"], na_position="last")
 
-        # ---- Decidir en qué registros se muestran las fotos ----
-        # Copiamos el df y vaciamos las imágenes de los registros que no
-        # deban mostrarlas, según el filtro de evidencia (independiente).
         dff_show = dff.copy()
         cols_img = ["img1", "img2", "img3", "img4"]
 
@@ -1797,15 +1616,13 @@ with tab_bitacora:
                     dff_show.loc[mask, c] = None
 
         if modo_fotos == "Sin fotos":
-            _borrar_fotos(dff_show.index.notna())  # todas
+            _borrar_fotos(dff_show.index.notna())
         elif modo_fotos == "Por semana" and foto_sem:
             _borrar_fotos(dff_show["semana"] != foto_sem)
         elif modo_fotos == "Por día" and foto_sem and foto_dia:
             _borrar_fotos(~((dff_show["semana"] == foto_sem) &
                             (dff_show["dia"] == foto_dia)))
-        # "Todas" -> no se borra nada
 
-        # ---- Contadores ----
         n_reg = len(dff_show)
         def _tiene(v):
             return v is not None and str(v).strip() not in ("", "None", "nan")
@@ -1814,21 +1631,18 @@ with tab_bitacora:
             for c in cols_img:
                 if c in dff_show.columns:
                     n_fotos += int(dff_show[c].apply(_tiene).sum())
-        st.markdown(f"**{n_reg}** registro(s) · **{n_fotos}** imagen(es) "
-                    "en la evidencia.")
+        st.markdown(f"**{n_reg}** registro(s) · **{n_fotos}** imagen(es)")
 
         registros = dff_show.to_dict("records")
         html = bitacora_html(registros, titulo=titulo)
 
         st.components.v1.html(html, height=650, scrolling=True)
 
-        # Registros para el Excel: se respeta el filtro de la TABLA (dff),
-        # con toda la informacion (el Excel no lleva fotos).
         registros_xlsx = dff.to_dict("records")
         dl1, dl2 = st.columns(2)
         with dl1:
             st.download_button(
-                "⬇️ Descargar bitácora (HTML para imprimir)",
+                "⬇️ Descargar bitácora (HTML)",
                 data=html.encode("utf-8"),
                 file_name=f"{titulo.replace(' ', '_').replace('—','-')}.html",
                 mime="text/html", use_container_width=True)
@@ -1840,16 +1654,12 @@ with tab_bitacora:
                 mime=("application/vnd.openxmlformats-officedocument."
                       "spreadsheetml.sheet"),
                 use_container_width=True)
-        st.caption("El HTML incluye la evidencia fotográfica; el Excel replica "
-                   "el formato oficial de la Matriz de impacto solo con la "
-                   "información de la tabla.")
 
 
 # =============================================================== TAB: Comentarios
 with tab_coment:
     st.subheader("💬 Comentarios semanales de evaluadores")
-    st.caption("Los evaluadores pueden dejar un comentario por semana. "
-               "Cada comentario queda firmado con su nombre y fecha.")
+    st.caption("Los evaluadores pueden dejar un comentario por semana.")
 
     with st.form("nuevo_coment", clear_on_submit=True):
         c1, c2 = st.columns([1, 2])
@@ -1885,43 +1695,3 @@ with tab_coment:
                     if st.button("🗑️ Eliminar", key=f"delc_{r['id']}"):
                         delete_comentario(int(r["id"]))
                         st.rerun()
-
-
-# ========================================
-# FUNCIONES PARA REPORTE HTML (IMPRIMIR PDF)
-# ========================================
-
-def generar_html_reporte(titulo, bloques):
-    """Genera un HTML completo del reporte para visualizar en el navegador."""
-    from reporte_pdf import _bloque_html, _html_completo, _prep_figuras
-    
-    cuerpo = ""
-    for b in bloques:
-        figs = _prep_figuras(b.get("figuras", []))
-        cuerpo += _bloque_html(
-            b.get("subtitulo", ""), 
-            b.get("kpis", {}),
-            figs, 
-            b.get("progreso"),
-            b.get("horas_acum"), 
-            b.get("horas_tot"),
-            b.get("comentarios")
-        )
-    
-    return _html_completo(cuerpo)
-
-
-def mostrar_reporte_html(titulo, bloques):
-    """Muestra el reporte en una página HTML para imprimir como PDF."""
-    html_completo = generar_html_reporte(titulo, bloques)
-    
-    # Mostrar el HTML
-    st.components.v1.html(html_completo, height=900, scrolling=True)
-    
-    st.info("""
-    📄 **Para guardar como PDF:**
-    1. Haz clic derecho en el reporte → **Imprimir** (o Ctrl+P / Cmd+P)
-    2. En **Destino**, selecciona **"Guardar como PDF"**
-    3. En **Más configuraciones**, elige **Tamaño: A4** y **Márgenes: Predeterminados**
-    4. Haz clic en **Guardar**
-    """)
