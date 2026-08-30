@@ -6,6 +6,6 @@ weasyprint
 openpyxl
 Pillow
 sqlalchemy
-psycopg[binary]
+psycopg2-binary
 requests
 matplotlib
