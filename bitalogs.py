@@ -2,7 +2,6 @@
 BitaLogs - Dashboard de rendimiento de práctica profesional.
 Ingeniería Biomédica · UNITEC · Autor: Luis
 """
-
 from datetime import date, datetime, time, timezone, timedelta
 from pathlib import Path
 
@@ -17,11 +16,12 @@ from importar_bitacora import leer_matriz
 from formato_bitacora import bitacora_html
 from matriz_excel import matriz_xlsx_bytes
 import ui_dashboard as ui
+# ============ IMPORTACIÓN CORREGIDA ============
 from reporte_pdf import construir_pdf, construir_pdf_multi, _bloque_html, _html_completo, _prep_figuras
+# ==============================================
 from splash import mostrar_splash
 import ai_extract
 
-# Honduras usa UTC-6 todo el año (sin horario de verano).
 _TZ_HN = timezone(timedelta(hours=-6))
 
 
@@ -29,29 +29,232 @@ def hoy_hn() -> date:
     return datetime.now(_TZ_HN).date()
 
 # ========================================
-# FUNCIONES PARA REPORTE HTML (IMPRIMIR PDF) - DEFINIDAS AL PRINCIPIO
+# FUNCIONES PARA REPORTE HTML CON PLOTLY (PARA IMPRIMIR PDF)
 # ========================================
 
-def generar_html_reporte(titulo, bloques):
-    """Genera un HTML completo del reporte para visualizar en el navegador."""
-    cuerpo = ""
-    for b in bloques:
-        figs = _prep_figuras(b.get("figuras", []))
-        cuerpo += _bloque_html(
-            b.get("subtitulo", ""), 
-            b.get("kpis", {}),
-            figs, 
-            b.get("progreso"),
-            b.get("horas_acum"), 
-            b.get("horas_tot"),
-            b.get("comentarios")
-        )
-    return _html_completo(cuerpo)
+def generar_html_reporte_con_plotly(titulo, bloques):
+    """Genera un HTML completo del reporte CON GRÁFICOS DE PLOTLY."""
+    import plotly.io as pio
+    
+    # Estilos y estructura
+    html_parts = []
+    
+    # HEAD
+    html_parts.append(f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>{titulo}</title>
+        <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+        <style>
+            @page {{ size: A4 portrait; margin: 8mm; }}
+            * {{ box-sizing: border-box; margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; }}
+            body {{ color: #1B2436; background: #fff; }}
+            .page {{ page-break-after: always; }}
+            .page:last-child {{ page-break-after: auto; }}
+            .hero {{
+                background: linear-gradient(120deg, #3B82F6, #60A5FA);
+                border-radius: 18px; padding: 18px 24px; color: #fff; margin-bottom: 11px;
+                display: flex; align-items: center; justify-content: space-between;
+            }}
+            .hero-l {{ display: flex; align-items: center; }}
+            .mark {{
+                width: 62px; height: 62px; border-radius: 15px; background: #fff;
+                display: flex; align-items: center; justify-content: center; padding: 8px; flex: none;
+            }}
+            .mark img {{ max-width: 100%; max-height: 100%; object-fit: contain; }}
+            .hero-txt {{ margin-left: 15px; }}
+            .hero h1 {{ font-size: 23px; font-weight: 800; line-height: 1.15; }}
+            .hero-txt p {{ color: #DCE9FF; font-size: 12.5px; margin-top: 4px; }}
+            .hero-r {{ color: #fff; text-align: right; white-space: nowrap; padding-left: 12px; }}
+            .hero-r .big {{ font-size: 30px; font-weight: 800; line-height: 1; }}
+            .hero-r .big span {{ font-size: 16px; color: #DCE9FF; font-weight: 700; }}
+            .hero-r .cap {{ color: #DCE9FF; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; margin-top: 5px; font-weight: 600; }}
+            .prog {{ height: 9px; border-radius: 6px; background: #E6EAF2; overflow: hidden; margin-bottom: 12px; }}
+            .prog-bar {{ height: 100%; background: #2563EB; border-radius: 6px; }}
+            .kpis {{ margin-bottom: 12px; }}
+            .kpi-row {{ display: flex; justify-content: center; gap: 12px; margin-bottom: 10px; }}
+            .kpi {{
+                width: 32%; background: #fff; border: 1px solid #E6EAF2; border-radius: 13px;
+                padding: 13px 16px; min-height: 78px;
+            }}
+            .kpi .ico {{ width: 38px; height: 38px; border-radius: 10px; display: flex;
+                        align-items: center; justify-content: center; margin-bottom: 7px; }}
+            .kpi .ico svg {{ width: 20px; height: 20px; }}
+            .kpi .val {{ font-size: 24px; font-weight: 800; line-height: 1; }}
+            .kpi .lbl {{ font-size: 11px; color: #6B7890; font-weight: 600; margin-top: 4px; }}
+            .grid {{ display: flex; flex-wrap: wrap; gap: 2%; }}
+            .gcard {{
+                width: 49%; background: #fff; border: 1px solid #E6EAF2;
+                border-radius: 14px; padding: 12px 15px; margin-bottom: 12px;
+                page-break-inside: avoid;
+            }}
+            .gh {{ font-size: 14px; font-weight: 700; margin-bottom: 7px; padding-left: 10px;
+                  border-left: 5px solid #2563EB; line-height: 1.2; }}
+            .gimg {{ width: 100%; height: auto; display: block; }}
+            .subhead {{ font-family: 'Poppins', Arial, sans-serif; font-weight: 700; font-size: 15px;
+                        color: #1B2436; display: flex; align-items: center; gap: 10px;
+                        margin-bottom: 14px; padding-bottom: 10px; border-bottom: 2px solid #E6EAF2; }}
+            .subhead-mark {{ width: 24px; height: 24px; border-radius: 7px;
+                            background: linear-gradient(135deg, #3B82F6, #60A5FA); display: inline-block; }}
+            .plotly-graph {{ width: 100%; height: 400px; }}
+            .coment-sec {{ margin-top: 6px; }}
+            .coment {{ background: #fff; border: 1px solid #E6EAF2; border-radius: 12px;
+                      padding: 12px 15px; margin-bottom: 9px; page-break-inside: avoid; }}
+            .coment-top {{ display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; }}
+            .coment-nom {{ font-family: 'Poppins', Arial, sans-serif; font-weight: 700; font-size: 13px; color: #1B2436; }}
+            .coment-meta {{ font-size: 10.5px; color: #6B7890; font-weight: 600; text-transform: uppercase; letter-spacing: .3px; }}
+            .coment-txt {{ font-size: 12px; color: #3A4560; line-height: 1.5; }}
+        </style>
+    </head>
+    <body>
+    """)
+
+    # BODY - Procesar cada bloque
+    for bloque in bloques:
+        subtitulo = bloque.get("subtitulo", "")
+        kpis = bloque.get("kpis", {})
+        figuras = bloque.get("figuras", [])
+        progreso = bloque.get("progreso", 0)
+        horas_acum = bloque.get("horas_acum", 0)
+        horas_tot = bloque.get("horas_tot", 400)
+        comentarios = bloque.get("comentarios", [])
+
+        # Iconos KPI
+        iconos = [
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7h-9M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></svg>',
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.7 2.7-2-2 2.7-2.7Z"/></svg>',
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>',
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 7-7"/><path d="M17 5h4v4"/></svg>',
+        ]
+        acentos_bg = ["#E0EBFF", "#D7F5F2", "#FEE2E2", "#EDE4FF", "#FEF0CF"]
+        kpi_acentos = ["#2563EB", "#0EA5A5", "#EF4444", "#7C3AED", "#F59E0B"]
+
+        # Construir KPIs
+        items = list(kpis.items())[:5]
+        filas_kpi = [items[:3], items[3:]]
+        kpi_html = ""
+        idx = 0
+        for fila in filas_kpi:
+            if not fila:
+                continue
+            kpi_html += '<div class="kpi-row">'
+            for k, v in fila:
+                kpi_html += f"""
+                  <div class="kpi">
+                    <div class="ico" style="background:{acentos_bg[idx%5]};color:{kpi_acentos[idx%5]}">{iconos[idx%5]}</div>
+                    <div class="val">{v}</div><div class="lbl">{k}</div>
+                  </div>"""
+                idx += 1
+            kpi_html += '</div>'
+
+        # Barra de progreso
+        barra_prog = ""
+        if progreso is not None:
+            barra_prog = f'<div class="prog"><div class="prog-bar" style="width:{max(0,min(progreso,100)):.1f}%"></div></div>'
+
+        # Hero
+        if horas_acum is not None and horas_tot:
+            pct_txt = f"{progreso:.0f}% completado" if progreso is not None else ""
+            cap = f"{subtitulo} · {pct_txt}" if pct_txt else subtitulo
+            hero_r = (f'<div class="hero-r">'
+                      f'<div class="big">{horas_acum} h '
+                      f'<span>/ {horas_tot} h</span></div>'
+                      f'<div class="cap">{cap}</div></div>')
+        else:
+            hero_r = f'<div class="hero-r"><div class="cap">{subtitulo}</div></div>'
+
+        # Gráficos: convertir a HTML con Plotly
+        primera = figuras[:4]
+        resto = figuras[4:]
+        
+        # Generar grid de gráficos
+        def _grid(figs):
+            h = ""
+            colores = ["#0EA5A5", "#2563EB", "#7C3AED", "#16A34A", "#F59E0B", "#0891B2"]
+            for i, (tit, fig) in enumerate(figs):
+                color = colores[i % len(colores)]
+                # Convertir figura a HTML
+                fig_html = pio.to_html(fig, full_html=False, include_plotlyjs=False,
+                                       config={'displayModeBar': False})
+                h += f"""
+                  <div class="gcard">
+                    <div class="gh" style="border-left-color:{color}">{tit}</div>
+                    <div class="plotly-graph">{fig_html}</div>
+                  </div>"""
+            return h
+
+        # Comentarios
+        coment_html = ""
+        if comentarios:
+            tarjetas = ""
+            for c in comentarios:
+                evaluador = c.get("evaluador", "Evaluador")
+                fecha = c.get("fecha", "")
+                semana = c.get("semana", "")
+                texto = c.get("comentario", "")
+                meta = f"Semana {semana}" + (f" · {fecha}" if fecha else "")
+                tarjetas += f"""
+                  <div class="coment">
+                    <div class="coment-top">
+                      <span class="coment-nom">{evaluador}</span>
+                      <span class="coment-meta">{meta}</span>
+                    </div>
+                    <div class="coment-txt">{texto}</div>
+                  </div>"""
+            coment_html = f"""
+              <div class="coment-sec">
+                <div class="subhead">
+                  <span class="subhead-mark"></span>
+                  Comentarios de los evaluadores
+                </div>
+                {tarjetas}
+              </div>"""
+
+        # Página principal
+        html_parts.append(f"""
+        <div class="page">
+          <div class="hero">
+            <div class="hero-l">
+              <div class="mark"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAARzQklUCAgICHwIZAAAAAlwSFlzAAAOxAAADsQBlSsOGwAAA7ZJREFUWEfdl3tIFFEcxr8zszPuuulavpJN00hQEbLoQSyBgiyEHoYRSGCEQmCBKPYHEWQUZJZBPRDDhAx6QUL0R4iYCYIhFBTUQvWA0h4S7Z+57fvbzszu7ux6Ec9++sEw5zvfOff3vWe+mR0C++c+8J/47fv9x9n+cZ1hgw3kQShCBCrwPF70B8CTaEYi6pj3V6cjwUGiq0Q7ibZ6AaCFqI3oIlFzPARo4PmyxP8qoCP2bN1KtFdNwA2u7UQXiT4QvSHa/g8BckBnA9FqogkiS6w0AzTXJSwAEX8gOkD0hagrpoXeAvj2R11nAD2yM9qI6kR9FPWXU/4fcFogagHwA4F2UCu2xGdoLUuuAHR4e6GIZyf1thI9aAyQpQN3ANVAfB2wBP6NEb0kKpW/lQBq1JoAWoFa7Yp5YddIswH0iPl6/3VE6/qcXQhBtMC+WtY8q/oG19YvquGtWtXmQFJNAEvCehM90ONkI4CjRJuI2ohOE80GAUA1B+Xrp4mqhM+JDRBJALrFnz2iP8zOoQ8IEVMGoBkkWt0t8u+Rc2qcrI4AfQoAvUJxltpDNBYrAz6xVkyA3F5u9cjm7Yq7eElbSJZ5rCwe8JgooA1Z2VuKhPe+E1mnbfT6sZISAgq3+rxPonR3hbyFpwAenD9ANEqUHg6AzS+rg0cr3qVYry3Z06++H6aDFwpPkJSQojhUlp5/kKwpwwBq8hV2TfyxrqK2LP6KdTO13z6CttIsulhYoz4MZ5MVCSDVQ/caUD9+WCH3/cv3ZPSlyJxx1phHrl3ZXPT4pMl7Azh4RSwB4pYAiDZLs7ALQGq40N1GVH8jCBhZQZSy1gB+vHtyi2jvLFEYAMtHmvg/lhSROlVMk12sAQBQXwKga51j1LNT7xoA4Q8hKQNgumAg0s7WMAHwnBEUoBYHOUgY4HvLFZZzD/IJkUoYf0u94gAePd1X3LptVjQD0Q3fK8VnE5HbTZ5Jk0Qz3kfI04PzssDheq5LCLh/WmgEAOn6TMR9m4nK54nS5GkTQWsTSUZGRsKbNm2aVlNTk9rQ0EB2u537J/aJI43PJ8kTVtTjcezMhKZMFgmxQQUhA4CZ1hPtGBoaaiJ6/149N67AIiMdoRwiLXpjPT8LCyt+vPWVpufhE0FOzsrK8qSlpdkdDgc3Njby0FAcF48vPTvrHj9szMt3lBXVRRzZzRG2YFnzrGeWJIZ6U3Z2dnJ5eXljTk6Oq6Ojg9Vz1hV41FYAIcE7IC4TYEGenYrEL2q0r2+oPm+BEE1MAAAAAElFTkSuQmCC" alt=""></div>
+              <div class="hero-txt">
+                <h1>BitaLogs - Panel de Rendimiento</h1>
+                <p>Luis Velásquez · Cuenta 21941285 · Ingeniería Biomédica</p>
+              </div>
+            </div>
+            {hero_r}
+          </div>
+          {barra_prog}
+          <div class="kpis">{kpi_html}</div>
+          <div class="grid">{_grid(primera)}</div>
+          {coment_html if not resto else ""}
+        </div>
+        """)
+
+        # Páginas de continuación
+        grupos = [resto[i:i+4] for i in range(0, len(resto), 4)]
+        for idx_g, grupo in enumerate(grupos):
+            es_ultimo = (idx_g == len(grupos) - 1)
+            html_parts.append(f"""
+        <div class="page">
+          <div class="subhead">
+            <span class="subhead-mark"></span>
+            BitaLogs · {subtitulo} · continuación
+          </div>
+          <div class="grid">{_grid(grupo)}</div>
+          {coment_html if es_ultimo else ""}
+        </div>
+        """)
+
+    html_parts.append("</body></html>")
+    return "\n".join(html_parts)
 
 
-def mostrar_reporte_html(titulo, bloques):
-    """Muestra el reporte en una página HTML para imprimir como PDF."""
-    html_completo = generar_html_reporte(titulo, bloques)
+def mostrar_reporte_html_con_plotly(titulo, bloques):
+    """Muestra el reporte con gráficos de Plotly para imprimir como PDF."""
+    html_completo = generar_html_reporte_con_plotly(titulo, bloques)
     st.components.v1.html(html_completo, height=900, scrolling=True)
     st.info("""
     📄 **Para guardar como PDF:**
@@ -1330,7 +1533,7 @@ with tab_dash:
                     "horas_tot": horas_tot,
                     "comentarios": coment_pdf
                 }]
-                mostrar_reporte_html("BitaLogs - Reporte", bloques_html)
+                mostrar_reporte_html_con_plotly("BitaLogs - Reporte", bloques_html)
 
         with cpdf2:
             if st.button("📄 PDF automático", key="gen_pdf_dash",
