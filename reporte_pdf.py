@@ -38,27 +38,47 @@ try:
 except Exception:
     _LOGO = ""
 
-
 def _fig_img_b64(fig, w=820, h=500, tipo="bar"):
     """Rasteriza una figura Plotly a PNG y la devuelve como data-URI."""
+    import base64
     import tempfile
     import os
-    import base64
     
     f = _estilizar(fig, tipo)
     
+    # Intentar con el método más robusto
     try:
-        # Método 1: write_image con archivo temporal (más estable)
+        # Usar archivo temporal con write_image
         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
             pio.write_image(f, tmp.name, width=w, height=h, scale=2, engine='kaleido')
-            with open(tmp.name, 'rb') as f_img:
-                png = f_img.read()
+            with open(tmp.name, 'rb') as img_file:
+                png_data = img_file.read()
             os.unlink(tmp.name)
-    except:
-        # Método 2: Fallback a to_image
-        png = f.to_image(format="png", width=w, height=h, scale=2)
+            return "data:image/png;base64," + base64.b64encode(png_data).decode()
+    except Exception as e:
+        print(f"Error con write_image: {e}")
+        
+    # Segundo intento: con formato diferente
+    try:
+        png_data = f.to_image(format="png", width=w, height=h, scale=2)
+        return "data:image/png;base64," + base64.b64encode(png_data).decode()
+    except Exception as e:
+        print(f"Error con to_image: {e}")
     
-    return "data:image/png;base64," + base64.b64encode(png).decode()
+    # Último recurso: imagen de respaldo
+    try:
+        from PIL import Image, ImageDraw
+        # Crear una imagen simple con el título
+        img = Image.new('RGB', (w, h), color='#f0f4f8')
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([0, 0, w, h], outline='#2563EB', width=3)
+        draw.text((w//4, h//2), "Gráfico no disponible", fill='#2563EB')
+        buf = BytesIO()
+        img.save(buf, format='png')
+        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+    except:
+        # Si todo falla, devolver un pixel transparente
+        return "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
 
 def _estilizar(fig, tipo):
     """Aplica el look del dashboard a la figura antes de rasterizar."""
