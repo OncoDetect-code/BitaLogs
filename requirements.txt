@@ -8,3 +8,4 @@ Pillow
 sqlalchemy
 psycopg[binary]
 requests
+matplotlib

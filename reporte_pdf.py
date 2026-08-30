@@ -15,6 +15,8 @@ Expone:
 import os
 import base64
 from io import BytesIO
+import tempfile
+import plotly.io as pio
 
 from weasyprint import HTML
 from PIL import Image
@@ -40,8 +42,94 @@ except Exception:
 def _fig_img_b64(fig, w=820, h=500, tipo="bar"):
     """Rasteriza una figura Plotly a PNG y la devuelve como data-URI."""
     f = _estilizar(fig, tipo)
-    png = f.to_image(format="png", width=w, height=h, scale=2)
+    
+    # Intentar diferentes métodos para generar la imagen
+    png = None
+    errores = []
+    
+    # Método 1: write_image con archivo temporal (más confiable en Streamlit Cloud)
+    try:
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+            pio.write_image(f, tmp.name, width=w, height=h, scale=2, engine='kaleido')
+            with open(tmp.name, 'rb') as f_img:
+                png = f_img.read()
+            os.unlink(tmp.name)
+    except Exception as e:
+        errores.append(f"write_image: {e}")
+    
+    # Método 2: to_image (fallback)
+    if png is None:
+        try:
+            png = f.to_image(format="png", width=w, height=h, scale=2)
+        except Exception as e:
+            errores.append(f"to_image: {e}")
+    
+    # Método 3: Imagen de respaldo simple
+    if png is None:
+        try:
+            print(f"Todos los métodos fallaron. Creando imagen de respaldo. Errores: {errores}")
+            png = _create_fallback_image(f, w, h)
+        except Exception as e:
+            print(f"Error crítico generando imagen de respaldo: {e}")
+            # Último recurso: imagen en blanco
+            from PIL import Image
+            img = Image.new('RGB', (int(w), int(h)), color='white')
+            buf = BytesIO()
+            img.save(buf, format='png')
+            png = buf.getvalue()
+    
     return "data:image/png;base64," + base64.b64encode(png).decode()
+
+
+def _create_fallback_image(fig, w=820, h=500):
+    """Crea una imagen de respaldo cuando Kaleido/Chrome falla."""
+    try:
+        import matplotlib.pyplot as plt
+        import numpy as np
+        
+        fig_mpl, ax = plt.subplots(figsize=(w/100, h/100))
+        
+        # Intentar extraer datos de la figura de Plotly
+        try:
+            data = fig.data[0]
+            if hasattr(data, 'x') and hasattr(data, 'y'):
+                x = data.x if data.x is not None else []
+                y = data.y if data.y is not None else []
+                if len(x) > 0 and len(y) > 0:
+                    ax.plot(x, y, color='#2563EB', linewidth=2)
+                    ax.set_title('Gráfico')
+                    ax.grid(True, alpha=0.3)
+                else:
+                    ax.text(0.5, 0.5, 'Gráfico no disponible', 
+                           ha='center', va='center', transform=ax.transAxes,
+                           fontsize=12)
+            else:
+                ax.text(0.5, 0.5, 'Gráfico no disponible', 
+                       ha='center', va='center', transform=ax.transAxes,
+                       fontsize=12)
+        except:
+            ax.text(0.5, 0.5, 'Gráfico no disponible', 
+                   ha='center', va='center', transform=ax.transAxes,
+                   fontsize=12)
+        
+        ax.set_xlabel('')
+        ax.set_ylabel('')
+        
+        # Guardar como PNG
+        buf = BytesIO()
+        plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+        buf.seek(0)
+        plt.close()
+        return buf.getvalue()
+    except:
+        # Si matplotlib falla, usar PIL
+        from PIL import Image, ImageDraw
+        img = Image.new('RGB', (int(w), int(h)), color='white')
+        draw = ImageDraw.Draw(img)
+        draw.text((w//4, h//2), "Gráfico no disponible", fill='black')
+        buf = BytesIO()
+        img.save(buf, format='png')
+        return buf.getvalue()
 
 
 def _estilizar(fig, tipo):
@@ -349,8 +437,6 @@ def _seccion_comentarios(comentarios):
         </div>
         {tarjetas}
       </div>"""
-    base = ["#0EA5A5", "#2563EB", "#7C3AED", "#16A34A", "#F59E0B", "#0891B2"]
-    return [base[i % len(base)] for i in range(n)]
 
 
 def _colores_secciones(n):
