@@ -6,6 +6,8 @@ import os
 import base64
 from io import BytesIO
 import plotly.io as pio
+import plotly.express as px
+import plotly.graph_objects as go
 
 from weasyprint import HTML
 from PIL import Image
@@ -28,33 +30,25 @@ except Exception:
     _LOGO = ""
 
 
+def _fig_to_html(fig, w=820, h=500):
+    """Convierte una figura de Plotly a HTML embebido."""
+    f = _estilizar(fig, "bar")
+    return pio.to_html(f, full_html=False, include_plotlyjs='cdn', 
+                       config={'displayModeBar': False})
+
+
 def _fig_img_b64(fig, w=820, h=500, tipo="bar"):
-    """Rasteriza una figura Plotly a PNG y la devuelve como data-URI."""
+    """Rasteriza una figura Plotly a PNG usando el método más confiable."""
     import base64
+    import tempfile
+    import os
     
     f = _estilizar(fig, tipo)
     
-    # USAR EL MÉTODO QUE SÍ FUNCIONA EN STREAMLIT CLOUD
+    # Método 1: try with temp file
     try:
-        # Configurar Kaleido explícitamente
-        pio.kaleido.scope.default_width = w
-        pio.kaleido.scope.default_height = h
-        pio.kaleido.scope.default_scale = 2
-        
-        # Generar imagen
-        png_bytes = pio.to_image(f, format='png', width=w, height=h, scale=2)
-        
-        if png_bytes:
-            return "data:image/png;base64," + base64.b64encode(png_bytes).decode()
-    except Exception as e:
-        print(f"Error generando imagen: {e}")
-    
-    # Si falla, usar el método de archivo temporal
-    try:
-        import tempfile
-        import os
         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-            pio.write_image(f, tmp.name, width=w, height=h, scale=2)
+            pio.write_image(f, tmp.name, width=w, height=h, scale=2, engine='kaleido')
             with open(tmp.name, 'rb') as img_file:
                 png_data = img_file.read()
             os.unlink(tmp.name)
@@ -62,17 +56,43 @@ def _fig_img_b64(fig, w=820, h=500, tipo="bar"):
     except:
         pass
     
-    # ÚLTIMO RECURSO: Imagen en blanco (pero con texto)
+    # Método 2: to_image
     try:
-        from PIL import Image, ImageDraw
-        img = Image.new('RGB', (w, h), color='#f0f4f8')
-        draw = ImageDraw.Draw(img)
-        draw.rectangle([10, 10, w-10, h-10], outline='#2563EB', width=2)
-        draw.text((w//3, h//2), "Gráfico no disponible", fill='#2563EB')
-        buf = BytesIO()
-        img.save(buf, format='png')
-        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+        png_data = f.to_image(format="png", width=w, height=h, scale=2)
+        return "data:image/png;base64," + base64.b64encode(png_data).decode()
     except:
+        pass
+    
+    # Método 3: generar un gráfico simple en SVG y convertirlo
+    try:
+        # Usar un gráfico de respaldo simple con plotly
+        fig_simple = go.Figure()
+        fig_simple.add_trace(go.Bar(
+            x=['Datos no disponibles'],
+            y=[1],
+            marker_color='#2563EB',
+            text=['Cargue datos nuevamente'],
+            textposition='outside'
+        ))
+        fig_simple.update_layout(
+            template='plotly_white',
+            height=h,
+            width=w,
+            margin=dict(l=40, r=40, t=40, b=40),
+            annotations=[dict(
+                x=0.5,
+                y=0.5,
+                xref='paper',
+                yref='paper',
+                text='Gráfico no disponible<br>Intente generar el reporte nuevamente',
+                showarrow=False,
+                font=dict(size=14, color='#666')
+            )]
+        )
+        png_data = fig_simple.to_image(format="png", width=w, height=h, scale=2)
+        return "data:image/png;base64," + base64.b64encode(png_data).decode()
+    except:
+        # Último recurso: pixel transparente
         return "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
 
 
@@ -294,11 +314,21 @@ _CSS = """
   .coment-meta{font-size:10.5px;color:#6B7890;font-weight:600;
                text-transform:uppercase;letter-spacing:.3px}
   .coment-txt{font-size:12px;color:#3A4560;line-height:1.5}
+  .plotly-graph-wrapper { width: 100%; height: auto; }
+  .plotly-graph-wrapper iframe { width: 100%; height: 400px; border: none; }
 """
 
 
 def _html_completo(cuerpo):
-    return f"<!DOCTYPE html><html><head><meta charset='utf-8'><style>{_CSS}</style></head><body>{cuerpo}</body></html>"
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8'>
+    <script src='https://cdn.plot.ly/plotly-2.27.0.min.js'></script>
+    <style>{_CSS}</style>
+</head>
+<body>{cuerpo}</body>
+</html>"""
 
 
 def _fmt_fecha(valor):
@@ -355,6 +385,7 @@ def _colores_secciones(n):
 
 
 def _prep_figuras(figuras):
+    """Convierte [(titulo, fig)] en [(titulo, img_b64, color)]."""
     cols = _colores_secciones(len(figuras))
     out = []
     for i, (tit, fig) in enumerate(figuras):
