@@ -5,7 +5,6 @@ reporte_pdf.py — Reporte de indicadores de BitaLogs en PDF
 import os
 import base64
 from io import BytesIO
-import tempfile
 import plotly.io as pio
 
 from weasyprint import HTML
@@ -28,19 +27,34 @@ try:
 except Exception:
     _LOGO = ""
 
+
 def _fig_img_b64(fig, w=820, h=500, tipo="bar"):
     """Rasteriza una figura Plotly a PNG y la devuelve como data-URI."""
     import base64
-    import tempfile
-    import os
-    from io import BytesIO
     
     f = _estilizar(fig, tipo)
     
-    # Intentar método 1: write_image
+    # USAR EL MÉTODO QUE SÍ FUNCIONA EN STREAMLIT CLOUD
     try:
+        # Configurar Kaleido explícitamente
+        pio.kaleido.scope.default_width = w
+        pio.kaleido.scope.default_height = h
+        pio.kaleido.scope.default_scale = 2
+        
+        # Generar imagen
+        png_bytes = pio.to_image(f, format='png', width=w, height=h, scale=2)
+        
+        if png_bytes:
+            return "data:image/png;base64," + base64.b64encode(png_bytes).decode()
+    except Exception as e:
+        print(f"Error generando imagen: {e}")
+    
+    # Si falla, usar el método de archivo temporal
+    try:
+        import tempfile
+        import os
         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-            pio.write_image(f, tmp.name, width=w, height=h, scale=2, engine='kaleido')
+            pio.write_image(f, tmp.name, width=w, height=h, scale=2)
             with open(tmp.name, 'rb') as img_file:
                 png_data = img_file.read()
             os.unlink(tmp.name)
@@ -48,119 +62,19 @@ def _fig_img_b64(fig, w=820, h=500, tipo="bar"):
     except:
         pass
     
-    # Intentar método 2: to_image
-    try:
-        png_data = f.to_image(format="png", width=w, height=h, scale=2)
-        return "data:image/png;base64," + base64.b64encode(png_data).decode()
-    except:
-        pass
-    
-    # Método 3: Usar matplotlib con extracción correcta de datos
-    try:
-        import matplotlib.pyplot as plt
-        import numpy as np
-        
-        fig_mpl, ax = plt.subplots(figsize=(w/100, h/100))
-        
-        # Obtener datos de la primera traza
-        data = f.data[0]
-        
-        # DETECTAR TIPO DE GRÁFICO Y EXTRAER DATOS
-        if data.type == 'pie':
-            # Gráfico circular
-            labels = data.labels if hasattr(data, 'labels') and data.labels is not None else []
-            values = data.values if hasattr(data, 'values') and data.values is not None else []
-            
-            if len(labels) > 0 and len(values) > 0:
-                colors = ['#2563EB', '#F59E0B', '#16A34A', '#7C3AED', '#EF4444', '#0EA5A5', '#DB2777']
-                ax.pie(values, labels=labels, autopct='%1.0f%%', colors=colors[:len(labels)],
-                       textprops={'fontsize': 10, 'weight': 'bold'})
-                ax.set_title('')
-            else:
-                ax.text(0.5, 0.5, 'Sin datos', ha='center', va='center', fontsize=14)
-                
-        elif data.type == 'bar':
-            # Gráfico de barras
-            if hasattr(data, 'x') and data.x is not None:
-                x = data.x
-            elif hasattr(data, 'y') and data.y is not None:
-                x = data.y
-            else:
-                x = []
-                
-            if hasattr(data, 'y') and data.y is not None:
-                y = data.y
-            elif hasattr(data, 'x') and data.x is not None:
-                y = data.x
-            else:
-                y = []
-            
-            # Si es horizontal
-            is_horizontal = hasattr(data, 'orientation') and data.orientation == 'h'
-            
-            if len(x) > 0 and len(y) > 0 and len(x) == len(y):
-                if is_horizontal:
-                    ax.barh(x, y, color='#2563EB')
-                else:
-                    ax.bar(x, y, color='#2563EB')
-                ax.grid(True, alpha=0.3)
-                ax.set_facecolor('#f8f9fa')
-                
-                # Rotar etiquetas si son muchas
-                if len(x) > 5:
-                    plt.xticks(rotation=45, ha='right')
-            else:
-                ax.text(0.5, 0.5, 'Sin datos para barras', ha='center', va='center', fontsize=14)
-                
-        elif data.type == 'scatter':
-            # Gráfico de líneas/dispersión
-            x = data.x if hasattr(data, 'x') and data.x is not None else []
-            y = data.y if hasattr(data, 'y') and data.y is not None else []
-            
-            if len(x) > 0 and len(y) > 0:
-                ax.plot(x, y, color='#2563EB', linewidth=2, marker='o')
-                ax.grid(True, alpha=0.3)
-                ax.set_facecolor('#f8f9fa')
-            else:
-                ax.text(0.5, 0.5, 'Sin datos de tendencia', ha='center', va='center', fontsize=14)
-        else:
-            ax.text(0.5, 0.5, f'Tipo: {data.type}', ha='center', va='center', fontsize=14)
-        
-        # Intentar obtener título del layout
-        try:
-            if hasattr(f, 'layout') and hasattr(f.layout, 'title'):
-                if f.layout.title and f.layout.title.text:
-                    ax.set_title(f.layout.title.text, fontsize=12, fontweight='bold')
-        except:
-            pass
-        
-        plt.tight_layout()
-        
-        # Guardar como PNG
-        buf = BytesIO()
-        plt.savefig(buf, format='png', dpi=150, bbox_inches='tight', facecolor='white')
-        buf.seek(0)
-        plt.close()
-        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
-        
-    except Exception as e:
-        print(f"Error con matplotlib: {e}")
-        import traceback
-        traceback.print_exc()
-    
-    # Último recurso: imagen en blanco con mensaje
+    # ÚLTIMO RECURSO: Imagen en blanco (pero con texto)
     try:
         from PIL import Image, ImageDraw
-        img = Image.new('RGB', (w, h), color='#f8f9fa')
+        img = Image.new('RGB', (w, h), color='#f0f4f8')
         draw = ImageDraw.Draw(img)
         draw.rectangle([10, 10, w-10, h-10], outline='#2563EB', width=2)
-        draw.text((w//3, h//2 - 20), "Gráfico no disponible", fill='#2563EB')
-        draw.text((w//3, h//2 + 10), "Intente nuevamente", fill='#666', size=12)
+        draw.text((w//3, h//2), "Gráfico no disponible", fill='#2563EB')
         buf = BytesIO()
         img.save(buf, format='png')
         return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
     except:
         return "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+
 
 def _estilizar(fig, tipo):
     """Aplica el look del dashboard a la figura antes de rasterizar."""
