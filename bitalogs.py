@@ -1859,3 +1859,42 @@ with tab_coment:
                     if st.button("🗑️ Eliminar", key=f"delc_{r['id']}"):
                         delete_comentario(int(r["id"]))
                         st.rerun()
+
+# ========================================
+# FUNCIONES PARA REPORTE HTML (IMPRIMIR PDF)
+# ========================================
+
+def generar_html_reporte(titulo, bloques):
+    """Genera un HTML completo del reporte para visualizar en el navegador."""
+    from reporte_pdf import _bloque_html, _html_completo, _prep_figuras
+    
+    cuerpo = ""
+    for b in bloques:
+        figs = _prep_figuras(b.get("figuras", []))
+        cuerpo += _bloque_html(
+            b.get("subtitulo", ""), 
+            b.get("kpis", {}),
+            figs, 
+            b.get("progreso"),
+            b.get("horas_acum"), 
+            b.get("horas_tot"),
+            b.get("comentarios")
+        )
+    
+    return _html_completo(cuerpo)
+
+
+def mostrar_reporte_html(titulo, bloques):
+    """Muestra el reporte en una página HTML para imprimir como PDF."""
+    html_completo = generar_html_reporte(titulo, bloques)
+    
+    # Mostrar el HTML
+    st.components.v1.html(html_completo, height=900, scrolling=True)
+    
+    st.info("""
+    📄 **Para guardar como PDF:**
+    1. Haz clic derecho en el reporte → **Imprimir** (o Ctrl+P / Cmd+P)
+    2. En **Destino**, selecciona **"Guardar como PDF"**
+    3. En **Más configuraciones**, elige **Tamaño: A4** y **Márgenes: Predeterminados**
+    4. Haz clic en **Guardar**
+    """)
