@@ -1285,13 +1285,13 @@ with tab_dash:
                     showarrow=False, xanchor="left", yanchor="bottom",
                     yshift=16, xshift=-2,
                     font=dict(size=13, color="#1B2436"))
-            altura_dist = max(360, 62 * len(dist) + 60)
+            altura_dist = max(360, 70 * len(dist) + 60)
             ui.estilizar_figura(fig_dist, altura=altura_dist, leyenda=False)
             fig_dist.update_layout(
                 yaxis=dict(showticklabels=False, title=""),
                 xaxis=dict(title="Horas"),
                 margin=dict(l=8, r=45, t=14, b=40),
-                bargap=0.55,
+                bargap=0.35,
                 uniformtext=dict(mode="hide", minsize=10))
             st.plotly_chart(fig_dist, use_container_width=True)
 
@@ -1436,9 +1436,11 @@ with tab_dash:
                     evol, x="Semana", y="Cantidad", color="tipo",
                     color_discrete_sequence=ui.PALETA,
                     labels={"tipo": "Tipo", "Cantidad": "Equipos"})
+                ui.estilizar_figura(fig_ev, altura=300, leyenda=True)
+                # barmode DESPUÉS de estilizar: el template de estilizar_figura
+                # resetea el barmode, así que se fuerza el apilado al final.
                 fig_ev.update_layout(barmode="stack", yaxis_title="Equipos",
                                      xaxis_title="")
-                ui.estilizar_figura(fig_ev, altura=300, leyenda=True)
                 st.plotly_chart(fig_ev, use_container_width=True)
 
         # ---- Reporte PDF (dashboard, imprimible) ----
