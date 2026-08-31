@@ -1,12 +1,10 @@
 streamlit
 pandas
-plotly
-kaleido>=1.3.0
+plotly==5.24.1
+kaleido==0.2.1
 weasyprint
 openpyxl
 Pillow
 sqlalchemy
-psycopg2-binary
+psycopg[binary]
 requests
-matplotlib
-numpy
