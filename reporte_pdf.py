@@ -1,13 +1,20 @@
 """
-reporte_pdf.py — Reporte de indicadores de BitaLogs en PDF
+reporte_pdf.py — Reporte de indicadores de BitaLogs en PDF, generado a
+partir de un HTML/CSS que replica el dashboard de la app (misma marca:
+hero azul, tarjetas KPI, tarjetas de gráfico con sombra, paleta viva).
+
+Los gráficos se rasterizan con Plotly/kaleido y se incrustan como
+imágenes, para que el HTML no dependa de JavaScript y wkhtmltopdf
+(motor WebKit) lo renderice fielmente.
+
+Expone:
+    construir_pdf(titulo, subtitulo, kpis, figuras) -> bytes
+    construir_pdf_multi(titulo, bloques) -> bytes
 """
 
 import os
 import base64
 from io import BytesIO
-import plotly.io as pio
-import plotly.express as px
-import plotly.graph_objects as go
 
 from weasyprint import HTML
 from PIL import Image
@@ -17,7 +24,7 @@ ESTUDIANTE = "Luis Velásquez"
 CUENTA = "21941285"
 CARRERA = "Ingeniería Biomédica"
 
-# ---- Paleta de marca ----
+# ---- Paleta de marca (idéntica al dashboard) ----
 _PALETA = ["#2563EB", "#0EA5A5", "#7C3AED", "#F59E0B", "#EF4444",
            "#16A34A", "#0891B2", "#DB2777"]
 _KPI_ACENTOS = ["#2563EB", "#0EA5A5", "#EF4444", "#7C3AED", "#F59E0B"]
@@ -30,70 +37,11 @@ except Exception:
     _LOGO = ""
 
 
-def _fig_to_html(fig, w=820, h=500):
-    """Convierte una figura de Plotly a HTML embebido."""
-    f = _estilizar(fig, "bar")
-    return pio.to_html(f, full_html=False, include_plotlyjs='cdn', 
-                       config={'displayModeBar': False})
-
-
 def _fig_img_b64(fig, w=820, h=500, tipo="bar"):
-    """Rasteriza una figura Plotly a PNG usando el método más confiable."""
-    import base64
-    import tempfile
-    import os
-    
+    """Rasteriza una figura Plotly a PNG y la devuelve como data-URI."""
     f = _estilizar(fig, tipo)
-    
-    # Método 1: try with temp file
-    try:
-        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-            pio.write_image(f, tmp.name, width=w, height=h, scale=2, engine='kaleido')
-            with open(tmp.name, 'rb') as img_file:
-                png_data = img_file.read()
-            os.unlink(tmp.name)
-            return "data:image/png;base64," + base64.b64encode(png_data).decode()
-    except:
-        pass
-    
-    # Método 2: to_image
-    try:
-        png_data = f.to_image(format="png", width=w, height=h, scale=2)
-        return "data:image/png;base64," + base64.b64encode(png_data).decode()
-    except:
-        pass
-    
-    # Método 3: generar un gráfico simple en SVG y convertirlo
-    try:
-        # Usar un gráfico de respaldo simple con plotly
-        fig_simple = go.Figure()
-        fig_simple.add_trace(go.Bar(
-            x=['Datos no disponibles'],
-            y=[1],
-            marker_color='#2563EB',
-            text=['Cargue datos nuevamente'],
-            textposition='outside'
-        ))
-        fig_simple.update_layout(
-            template='plotly_white',
-            height=h,
-            width=w,
-            margin=dict(l=40, r=40, t=40, b=40),
-            annotations=[dict(
-                x=0.5,
-                y=0.5,
-                xref='paper',
-                yref='paper',
-                text='Gráfico no disponible<br>Intente generar el reporte nuevamente',
-                showarrow=False,
-                font=dict(size=14, color='#666')
-            )]
-        )
-        png_data = fig_simple.to_image(format="png", width=w, height=h, scale=2)
-        return "data:image/png;base64," + base64.b64encode(png_data).decode()
-    except:
-        # Último recurso: pixel transparente
-        return "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    png = f.to_image(format="png", width=w, height=h, scale=2)
+    return "data:image/png;base64," + base64.b64encode(png).decode()
 
 
 def _estilizar(fig, tipo):
@@ -103,12 +51,18 @@ def _estilizar(fig, tipo):
     barras_h = any(getattr(t, "orientation", None) == "h"
                    for t in f.data if t.type == "bar")
     tiene_pie = any(t.type == "pie" for t in f.data)
+    # Barras apiladas / agrupadas: varias trazas de barras con nombre
+    # (p. ej. la evolución del tipo por semana). Necesitan leyenda para
+    # saber qué color es cada serie.
     trazas_bar_nombradas = [t for t in f.data
                             if t.type == "bar" and getattr(t, "name", None)]
     trazas_linea_nombradas = [t for t in f.data
                               if t.type == "scatter" and getattr(t, "name", None)]
     es_apilado = (f.layout.barmode == "stack") or len(trazas_bar_nombradas) > 1
     es_multilinea = len(trazas_linea_nombradas) > 1
+    # Las barras horizontales ya llevan el nombre de cada categoría como
+    # título arriba de la barra, así que la leyenda sería redundante y se
+    # amontona: se omite en ese caso.
     mostrar_leyenda = (tiene_pie or es_apilado or es_multilinea) and not barras_h
 
     f.update_layout(
@@ -200,6 +154,8 @@ def _bloque_html(subtitulo, kpis, figuras, progreso=None,
     if progreso is not None:
         barra_prog = f'<div class="prog"><div class="prog-bar" style="width:{max(0,min(progreso,100)):.1f}%"></div></div>'
 
+    # Hero derecho: si hay horas, muestra el dato estrella grande
+    # (104 h / 400 h) con periodo y % completado, como el dashboard.
     if horas_acum is not None and horas_tot:
         pct_txt = f"{progreso:.0f}% completado" if progreso is not None else ""
         cap = f"{subtitulo} · {pct_txt}" if pct_txt else subtitulo
@@ -220,6 +176,9 @@ def _bloque_html(subtitulo, kpis, figuras, progreso=None,
               </div>"""
         return h
 
+    # Primera página: hero + KPIs + hasta 4 gráficos. Si hay más, van en
+    # páginas siguientes con un encabezado ligero (sin repetir KPIs), para
+    # que cada página quede bien armada en vez de dejar huecos.
     primera = figuras[:4]
     resto = figuras[4:]
     coment_html = _seccion_comentarios(comentarios or [])
@@ -244,6 +203,8 @@ def _bloque_html(subtitulo, kpis, figuras, progreso=None,
 
     grupos = [resto[i:i+4] for i in range(0, len(resto), 4)]
     for idx_g, grupo in enumerate(grupos):
+        # Los comentarios van pegados al último grupo de gráficos, para
+        # aprovechar el espacio restante de esa página.
         es_ultimo = (idx_g == len(grupos) - 1)
         html += f"""
     <div class="page">
@@ -264,6 +225,8 @@ _CSS = """
   body{color:#1B2436;background:#fff}
   .page{page-break-after:always}
   .page:last-child{page-break-after:auto}
+
+  /* Hero, con flex (WeasyPrint sí lo soporta) */
   .hero{background:linear-gradient(120deg,#3B82F6,#60A5FA);
         border-radius:18px;padding:18px 24px;color:#fff;margin-bottom:11px;
         display:flex;align-items:center;justify-content:space-between}
@@ -280,13 +243,18 @@ _CSS = """
   .hero-r .big span{font-size:16px;color:#DCE9FF;font-weight:700}
   .hero-r .cap{color:#DCE9FF;font-size:11px;text-transform:uppercase;
                letter-spacing:.4px;margin-top:5px;font-weight:600}
+
   .prog{height:9px;border-radius:6px;background:#E6EAF2;overflow:hidden;margin-bottom:12px}
   .prog-bar{height:100%;background:#2563EB;border-radius:6px}
+
+  /* Encabezado ligero para páginas de continuación */
   .subhead{font-family:'Poppins',Arial,sans-serif;font-weight:700;font-size:15px;
            color:#1B2436;display:flex;align-items:center;gap:10px;
            margin-bottom:14px;padding-bottom:10px;border-bottom:2px solid #E6EAF2}
   .subhead-mark{width:24px;height:24px;border-radius:7px;
                 background:linear-gradient(135deg,#3B82F6,#60A5FA);display:inline-block}
+
+  /* KPIs con flex, 3+2 centrados */
   .kpis{margin-bottom:12px}
   .kpi-row{display:flex;justify-content:center;gap:12px;margin-bottom:10px}
   .kpi-row:last-child{margin-bottom:0}
@@ -297,6 +265,8 @@ _CSS = """
   .kpi .ico svg{width:20px;height:20px}
   .kpi .val{font-size:24px;font-weight:800;line-height:1}
   .kpi .lbl{font-size:11px;color:#6B7890;font-weight:600;margin-top:4px}
+
+  /* Grilla de gráficos: 2 columnas con flex */
   .grid{display:flex;flex-wrap:wrap;gap:2%}
   .gcard{width:49%;background:#fff;border:1px solid #E6EAF2;
          border-radius:14px;padding:12px 15px;margin-bottom:12px;
@@ -304,6 +274,8 @@ _CSS = """
   .gh{font-size:14px;font-weight:700;margin-bottom:7px;padding-left:10px;
       border-left:5px solid #2563EB;line-height:1.2}
   .gimg{width:100%;height:auto;display:block}
+
+  /* Sección de comentarios de evaluadores */
   .coment-sec{margin-top:6px}
   .coment{background:#fff;border:1px solid #E6EAF2;border-radius:12px;
           padding:12px 15px;margin-bottom:9px;page-break-inside:avoid}
@@ -314,24 +286,19 @@ _CSS = """
   .coment-meta{font-size:10.5px;color:#6B7890;font-weight:600;
                text-transform:uppercase;letter-spacing:.3px}
   .coment-txt{font-size:12px;color:#3A4560;line-height:1.5}
-  .plotly-graph-wrapper { width: 100%; height: auto; }
-  .plotly-graph-wrapper iframe { width: 100%; height: 400px; border: none; }
 """
 
 
 def _html_completo(cuerpo):
-    return f"""<!DOCTYPE html>
-<html>
-<head>
-    <meta charset='utf-8'>
-    <script src='https://cdn.plot.ly/plotly-2.27.0.min.js'></script>
-    <style>{_CSS}</style>
-</head>
-<body>{cuerpo}</body>
-</html>"""
+    return f"<!DOCTYPE html><html><head><meta charset='utf-8'><style>{_CSS}</style></head><body>{cuerpo}</body></html>"
 
 
 def _fmt_fecha(valor):
+    """
+    Convierte una fecha guardada como ISO (2026-08-05T14:30) a un formato
+    legible en español (5 ago 2026, 14:30). Si no puede parsearla, la
+    devuelve tal cual.
+    """
     if not valor:
         return ""
     s = str(valor).strip()
@@ -352,6 +319,11 @@ def _fmt_fecha(valor):
 
 
 def _seccion_comentarios(comentarios):
+    """
+    HTML de la sección de comentarios de evaluadores. `comentarios` es una
+    lista de dicts con claves: evaluador, fecha, semana, comentario.
+    Devuelve '' si no hay comentarios.
+    """
     if not comentarios:
         return ""
     tarjetas = ""
@@ -377,6 +349,8 @@ def _seccion_comentarios(comentarios):
         </div>
         {tarjetas}
       </div>"""
+    base = ["#0EA5A5", "#2563EB", "#7C3AED", "#16A34A", "#F59E0B", "#0891B2"]
+    return [base[i % len(base)] for i in range(n)]
 
 
 def _colores_secciones(n):
