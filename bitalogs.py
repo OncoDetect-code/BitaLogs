@@ -1285,13 +1285,13 @@ with tab_dash:
                     showarrow=False, xanchor="left", yanchor="bottom",
                     yshift=16, xshift=-2,
                     font=dict(size=13, color="#1B2436"))
-            altura_dist = max(360, 70 * len(dist) + 60)
+            altura_dist = max(340, 48 * len(dist) + 50)
             ui.estilizar_figura(fig_dist, altura=altura_dist, leyenda=False)
             fig_dist.update_layout(
                 yaxis=dict(showticklabels=False, title=""),
                 xaxis=dict(title="Horas"),
                 margin=dict(l=8, r=45, t=14, b=40),
-                bargap=0.35,
+                bargap=0.3,
                 uniformtext=dict(mode="hide", minsize=10))
             st.plotly_chart(fig_dist, use_container_width=True)
 
