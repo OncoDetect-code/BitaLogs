@@ -2,7 +2,6 @@
 BitaLogs - Dashboard de rendimiento de práctica profesional.
 Ingeniería Biomédica · UNITEC · Autor: Luis
 """
-
 import base64
 from datetime import date, datetime, time, timezone, timedelta
 from pathlib import Path
@@ -1257,183 +1256,151 @@ with tab_dash:
                 ui.estilizar_figura(fig_ev, altura=300, leyenda=True)
                 st.plotly_chart(fig_ev, use_container_width=True)
 
-        # ============================================================
-        # SECCIÓN DE REPORTES - REEMPLAZAR CON ESTO
-        # ============================================================
-        st.divider()
-        st.subheader("📄 Reportes para imprimir")
+       # ============================================================
+# SECCIÓN DE REPORTES - VERSIÓN QUE FUNCIONA
+# ============================================================
+st.divider()
+st.subheader("📄 Reportes para imprimir (abrir en nueva pestaña)")
 
-        col_r1, col_r2, col_r3 = st.columns([1, 1, 1])
+# ========== BOTÓN 1: Toda la práctica ==========
+if st.button("📄 Reporte completo (Toda la práctica)", use_container_width=True):
+    # Obtener datos
+    df_full = _prep(load_atenciones())
+    df_act_full = load_actividades_extra()
+    df_act_full["_fecha"] = pd.to_datetime(df_act_full.get("fecha"), errors="coerce")
+    coment_full = load_comentarios().sort_values("fecha_registro").to_dict("records")
+    horas_tot = cal.horas_totales_practica()
+    horas_acum = cal.horas_hasta(hoy_hn())
+    
+    # Construir KPIs y figuras
+    kpis, figuras = construir_bloque_indicadores(
+        df_full, df_act_full, "Toda la práctica", horas_acum, horas_tot
+    )
+    
+    # Generar HTML
+    from reporte_pdf import _bloque_html, _html_completo, _prep_figuras
+    figs_prep = _prep_figuras(figuras)
+    html_completo = _html_completo(_bloque_html(
+        "Toda la práctica", kpis, figs_prep,
+        horas_acum / horas_tot * 100 if horas_tot else 0,
+        horas_acum, horas_tot, coment_full
+    ))
+    
+    # Abrir en nueva pestaña
+    b64_html = base64.b64encode(html_completo.encode()).decode()
+    js = f"""
+    <script>
+    window.open('data:text/html;base64,{b64_html}', '_blank');
+    </script>
+    """
+    st.components.v1.html(js, height=0)
+    st.success("✅ Reporte abierto en nueva pestaña. Presioná Ctrl+P para guardar como PDF.")
 
-        with col_r1:
-            if st.button("📄 Toda la práctica", use_container_width=True):
-                st.session_state["reporte_tipo"] = "toda"
-                st.session_state["reporte_semana"] = None
-                st.rerun()
+# ========== BOTÓN 2: Semana específica ==========
+st.markdown("---")
+st.caption("O seleccioná una semana específica:")
 
-        with col_r2:
-            semanas_opciones = ["Seleccionar..."] + [f"Semana {s}" for s in cal.lista_semanas()]
-            semana_seleccionada = st.selectbox(
-                "Semana",
-                semanas_opciones,
-                key="select_semana_reporte"
+col_semana, col_boton = st.columns([2, 1])
+with col_semana:
+    semana_seleccionada = st.selectbox(
+        "Semana",
+        [f"Semana {s}" for s in cal.lista_semanas()],
+        key="select_semana_reporte_final"
+    )
+with col_boton:
+    if st.button("📄 Ver semana", use_container_width=True):
+        semana = int(semana_seleccionada.split()[1])
+        etiqueta = f"Semana {semana}"
+        
+        # Obtener datos filtrados
+        df_full = _prep(load_atenciones())
+        df_semana = df_full[df_full["semana"] == semana]
+        df_act_full = load_actividades_extra()
+        df_act_full["_fecha"] = pd.to_datetime(df_act_full.get("fecha"), errors="coerce")
+        df_act_semana = df_act_full[df_act_full["semana"] == semana]
+        horas_acum_semana = cal.horas_hasta(cal.viernes_de_semana(semana))
+        horas_tot = cal.horas_totales_practica()
+        coment_full = load_comentarios()
+        coment_semana = coment_full[coment_full["semana"] == semana].sort_values("fecha_registro").to_dict("records")
+        
+        # Construir KPIs y figuras
+        kpis_semana, figuras_semana = construir_bloque_indicadores(
+            df_semana, df_act_semana, etiqueta, horas_acum_semana, horas_tot
+        )
+        
+        # Generar HTML
+        from reporte_pdf import _bloque_html, _html_completo, _prep_figuras
+        figs_prep_semana = _prep_figuras(figuras_semana)
+        html_semana = _html_completo(_bloque_html(
+            etiqueta, kpis_semana, figs_prep_semana,
+            horas_acum_semana / horas_tot * 100 if horas_tot else 0,
+            horas_acum_semana, horas_tot, coment_semana
+        ))
+        
+        # Abrir en nueva pestaña
+        b64_html_semana = base64.b64encode(html_semana.encode()).decode()
+        js_semana = f"""
+        <script>
+        window.open('data:text/html;base64,{b64_html_semana}', '_blank');
+        </script>
+        """
+        st.components.v1.html(js_semana, height=0)
+        st.success(f"✅ Reporte de {etiqueta} abierto en nueva pestaña.")
+
+# ========== BOTÓN 3: Todas las semanas ==========
+st.markdown("---")
+if st.button("📚 Reporte de todas las semanas (1-10)", use_container_width=True):
+    df_full_reporte = _prep(load_atenciones())
+    df_act_full_reporte = load_actividades_extra()
+    df_act_full_reporte["_fecha"] = pd.to_datetime(df_act_full_reporte.get("fecha"), errors="coerce")
+    coment_full_reporte = load_comentarios()
+    horas_tot_reporte = cal.horas_totales_practica()
+    
+    bloques = []
+    for s in cal.lista_semanas():
+        sub = df_full_reporte[df_full_reporte["semana"] == s] if not df_full_reporte.empty else df_full_reporte
+        sub_act = (df_act_full_reporte[df_act_full_reporte["semana"] == s]
+                   if not df_act_full_reporte.empty else df_act_full_reporte)
+        if sub.empty and sub_act.empty:
+            continue
+        h_acum = cal.horas_hasta(cal.viernes_de_semana(s))
+        kpis_s, figs_s = construir_bloque_indicadores(
+            sub, sub_act, f"Semana {s}", h_acum, horas_tot_reporte)
+        com_s = (coment_full_reporte[coment_full_reporte["semana"] == s]
+                 if not coment_full_reporte.empty else coment_full_reporte)
+        com_s = com_s.rename(columns={
+            "fecha_registro": "fecha"}).to_dict("records") if not com_s.empty else []
+        bloques.append({
+            "subtitulo": f"Semana {s}",
+            "kpis": kpis_s, "figuras": figs_s,
+            "progreso": h_acum / horas_tot_reporte * 100 if horas_tot_reporte else 0,
+            "horas_acum": h_acum, "horas_tot": horas_tot_reporte,
+            "comentarios": com_s
+        })
+    
+    if bloques:
+        from reporte_pdf import _bloque_html, _html_completo, _prep_figuras
+        cuerpo = ""
+        for b in bloques:
+            figs = _prep_figuras(b.get("figuras", []))
+            cuerpo += _bloque_html(
+                b.get("subtitulo", ""), b.get("kpis", {}),
+                figs, b.get("progreso"),
+                b.get("horas_acum"), b.get("horas_tot"),
+                b.get("comentarios")
             )
-            if semana_seleccionada != "Seleccionar...":
-                if st.button("📄 Ver semana", use_container_width=True):
-                    st.session_state["reporte_tipo"] = "semana"
-                    st.session_state["reporte_semana"] = int(semana_seleccionada.split()[1])
-                    st.rerun()
-
-        with col_r3:
-            if st.button("📚 PDF semana 1-10", use_container_width=True):
-                st.session_state["reporte_tipo"] = "multi"
-                st.session_state["reporte_semana"] = None
-                st.rerun()
-
-        # Mostrar el reporte seleccionado
-        if "reporte_tipo" in st.session_state:
-            tipo = st.session_state["reporte_tipo"]
-            
-            if tipo == "toda":
-                etiqueta = "Toda la práctica"
-                fdf_reporte = df.copy()
-                fdf_act_reporte = load_actividades_extra()
-                fdf_act_reporte["_fecha"] = pd.to_datetime(fdf_act_reporte.get("fecha"), errors="coerce")
-                horas_acum_reporte = cal.horas_hasta(hoy_hn())
-                horas_tot_reporte = cal.horas_totales_practica()
-                comentarios_reporte = load_comentarios().sort_values("fecha_registro").to_dict("records")
-                
-                kpis, figuras = construir_bloque_indicadores(
-                    fdf_reporte, fdf_act_reporte, etiqueta, horas_acum_reporte, horas_tot_reporte
-                )
-                
-                figs_prep = _prep_figuras(figuras)
-                html_completo = _html_completo(_bloque_html(
-                    etiqueta, kpis, figs_prep,
-                    horas_acum_reporte / horas_tot_reporte * 100 if horas_tot_reporte else 0,
-                    horas_acum_reporte, horas_tot_reporte, comentarios_reporte
-                ))
-                
-                st.markdown(f"""
-                <div style="text-align: center; margin: 20px 0;">
-                    <a href="data:text/html;base64,{base64.b64encode(html_completo.encode()).decode()}" 
-                       target="_blank" 
-                       style="background-color: #2563EB; color: white; padding: 12px 24px; 
-                              border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 16px;">
-                        📄 Abrir reporte completo en nueva pestaña
-                    </a>
-                </div>
-                <p style="text-align: center; color: #666; font-size: 14px;">
-                    Al abrirse en una nueva pestaña, podés imprimir con Ctrl+P y guardar como PDF
-                </p>
-                """, unsafe_allow_html=True)
-                
-                st.components.v1.html(html_completo, height=600, scrolling=True)
-                
-            elif tipo == "semana":
-                semana = st.session_state["reporte_semana"]
-                etiqueta = f"Semana {semana}"
-                fdf_reporte = df[df["semana"] == semana]
-                fdf_act_reporte = load_actividades_extra()
-                fdf_act_reporte["_fecha"] = pd.to_datetime(fdf_act_reporte.get("fecha"), errors="coerce")
-                fdf_act_reporte = fdf_act_reporte[fdf_act_reporte["semana"] == semana]
-                horas_acum_reporte = cal.horas_hasta(cal.viernes_de_semana(semana))
-                horas_tot_reporte = cal.horas_totales_practica()
-                comentarios_reporte = load_comentarios()
-                comentarios_reporte = comentarios_reporte[comentarios_reporte["semana"] == semana].sort_values("fecha_registro").to_dict("records")
-                
-                kpis, figuras = construir_bloque_indicadores(
-                    fdf_reporte, fdf_act_reporte, etiqueta, horas_acum_reporte, horas_tot_reporte
-                )
-                
-                figs_prep = _prep_figuras(figuras)
-                html_completo = _html_completo(_bloque_html(
-                    etiqueta, kpis, figs_prep,
-                    horas_acum_reporte / horas_tot_reporte * 100 if horas_tot_reporte else 0,
-                    horas_acum_reporte, horas_tot_reporte, comentarios_reporte
-                ))
-                
-                st.markdown(f"""
-                <div style="text-align: center; margin: 20px 0;">
-                    <a href="data:text/html;base64,{base64.b64encode(html_completo.encode()).decode()}" 
-                       target="_blank" 
-                       style="background-color: #2563EB; color: white; padding: 12px 24px; 
-                              border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 16px;">
-                        📄 Abrir reporte de {etiqueta} en nueva pestaña
-                    </a>
-                </div>
-                <p style="text-align: center; color: #666; font-size: 14px;">
-                    Al abrirse en una nueva pestaña, podés imprimir con Ctrl+P y guardar como PDF
-                </p>
-                """, unsafe_allow_html=True)
-                
-                st.components.v1.html(html_completo, height=600, scrolling=True)
-                
-            elif tipo == "multi":
-                # Generar PDF múltiple con todas las semanas
-                with st.spinner("Generando reporte de todas las semanas..."):
-                    df_full = _prep(load_atenciones())
-                    df_act_full = load_actividades_extra()
-                    df_act_full["_fecha"] = pd.to_datetime(df_act_full.get("fecha"), errors="coerce")
-                    coment_full = load_comentarios()
-                    horas_tot = cal.horas_totales_practica()
-                    bloques = []
-                    for s in cal.lista_semanas():
-                        sub = df_full[df_full["semana"] == s] if not df_full.empty else df_full
-                        sub_act = (df_act_full[df_act_full["semana"] == s]
-                                   if not df_act_full.empty else df_act_full)
-                        if sub.empty and sub_act.empty:
-                            continue
-                        h_acum = cal.horas_hasta(cal.viernes_de_semana(s))
-                        kpis_s, figs_s = construir_bloque_indicadores(
-                            sub, sub_act, f"Semana {s}", h_acum, horas_tot)
-                        com_s = (coment_full[coment_full["semana"] == s]
-                                 if not coment_full.empty else coment_full)
-                        com_s = com_s.rename(columns={
-                            "fecha_registro": "fecha"}).to_dict("records") \
-                            if not com_s.empty else []
-                        bloques.append({
-                            "subtitulo": f"Semana {s}",
-                            "kpis": kpis_s, "figuras": figs_s,
-                            "progreso": h_acum / horas_tot * 100 if horas_tot else 0,
-                            "horas_acum": h_acum, "horas_tot": horas_tot,
-                            "comentarios": com_s})
-                    
-                    if bloques:
-                        # Construir HTML combinado
-                        cuerpo = ""
-                        for b in bloques:
-                            figs = _prep_figuras(b.get("figuras", []))
-                            cuerpo += _bloque_html(
-                                b.get("subtitulo", ""), b.get("kpis", {}),
-                                figs, b.get("progreso"),
-                                b.get("horas_acum"), b.get("horas_tot"),
-                                b.get("comentarios")
-                            )
-                        html_completo = _html_completo(cuerpo)
-                        
-                        st.markdown(f"""
-                        <div style="text-align: center; margin: 20px 0;">
-                            <a href="data:text/html;base64,{base64.b64encode(html_completo.encode()).decode()}" 
-                               target="_blank" 
-                               style="background-color: #2563EB; color: white; padding: 12px 24px; 
-                                      border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 16px;">
-                                📄 Abrir reporte de todas las semanas (1-10)
-                            </a>
-                        </div>
-                        <p style="text-align: center; color: #666; font-size: 14px;">
-                            Al abrirse en una nueva pestaña, podés imprimir con Ctrl+P y guardar como PDF
-                        </p>
-                        """, unsafe_allow_html=True)
-                        
-                        st.components.v1.html(html_completo, height=600, scrolling=True)
-                    else:
-                        st.warning("No hay datos registrados en ninguna semana.")
-
-            # Botón para cerrar
-            if st.button("❌ Cerrar reporte", use_container_width=True):
-                st.session_state["reporte_tipo"] = None
-                st.rerun()
+        html_multi = _html_completo(cuerpo)
+        
+        b64_html_multi = base64.b64encode(html_multi.encode()).decode()
+        js_multi = f"""
+        <script>
+        window.open('data:text/html;base64,{b64_html_multi}', '_blank');
+        </script>
+        """
+        st.components.v1.html(js_multi, height=0)
+        st.success("✅ Reporte de todas las semanas abierto en nueva pestaña.")
+    else:
+        st.warning("No hay datos registrados en ninguna semana.")
 
         # ---- Exportar ----
         st.divider()
