@@ -1256,13 +1256,223 @@ with tab_dash:
                 ui.estilizar_figura(fig_ev, altura=300, leyenda=True)
                 st.plotly_chart(fig_ev, use_container_width=True)
 
-       # ============================================================
-# SECCIÓN DE REPORTES - VERSIÓN QUE FUNCIONA
+     # ============================================================
+# SECCIÓN DE REPORTES - HTML CON PLOTLY.JS (FUNCIONA)
 # ============================================================
 st.divider()
-st.subheader("📄 Reportes para imprimir (abrir en nueva pestaña)")
+st.subheader("📄 Reportes para imprimir (gráficos interactivos)")
 
-# ========== BOTÓN 1: Toda la práctica ==========
+def generar_reporte_html_con_plotly(titulo, bloques):
+    """Genera HTML con gráficos de Plotly usando Plotly.js"""
+    import plotly.io as pio
+    import json
+    
+    html_parts = []
+    html_parts.append(f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>{titulo}</title>
+        <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+        <style>
+            @page {{ size: A4 portrait; margin: 8mm; }}
+            * {{ box-sizing: border-box; margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; }}
+            body {{ color: #1B2436; background: #fff; }}
+            .page {{ page-break-after: always; }}
+            .page:last-child {{ page-break-after: auto; }}
+            .hero {{
+                background: linear-gradient(120deg, #3B82F6, #60A5FA);
+                border-radius: 18px; padding: 18px 24px; color: #fff; margin-bottom: 11px;
+                display: flex; align-items: center; justify-content: space-between;
+            }}
+            .hero-l {{ display: flex; align-items: center; }}
+            .mark {{
+                width: 62px; height: 62px; border-radius: 15px; background: #fff;
+                display: flex; align-items: center; justify-content: center; padding: 8px; flex: none;
+            }}
+            .mark img {{ max-width: 100%; max-height: 100%; object-fit: contain; }}
+            .hero-txt {{ margin-left: 15px; }}
+            .hero h1 {{ font-size: 23px; font-weight: 800; line-height: 1.15; }}
+            .hero-txt p {{ color: #DCE9FF; font-size: 12.5px; margin-top: 4px; }}
+            .hero-r {{ color: #fff; text-align: right; white-space: nowrap; padding-left: 12px; }}
+            .hero-r .big {{ font-size: 30px; font-weight: 800; line-height: 1; }}
+            .hero-r .big span {{ font-size: 16px; color: #DCE9FF; font-weight: 700; }}
+            .hero-r .cap {{ color: #DCE9FF; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; margin-top: 5px; font-weight: 600; }}
+            .prog {{ height: 9px; border-radius: 6px; background: #E6EAF2; overflow: hidden; margin-bottom: 12px; }}
+            .prog-bar {{ height: 100%; background: #2563EB; border-radius: 6px; }}
+            .kpis {{ margin-bottom: 12px; }}
+            .kpi-row {{ display: flex; justify-content: center; gap: 12px; margin-bottom: 10px; }}
+            .kpi {{
+                width: 32%; background: #fff; border: 1px solid #E6EAF2; border-radius: 13px;
+                padding: 13px 16px; min-height: 78px;
+            }}
+            .kpi .ico {{ width: 38px; height: 38px; border-radius: 10px; display: flex;
+                        align-items: center; justify-content: center; margin-bottom: 7px; }}
+            .kpi .ico svg {{ width: 20px; height: 20px; }}
+            .kpi .val {{ font-size: 24px; font-weight: 800; line-height: 1; }}
+            .kpi .lbl {{ font-size: 11px; color: #6B7890; font-weight: 600; margin-top: 4px; }}
+            .grid {{ display: flex; flex-wrap: wrap; gap: 2%; }}
+            .gcard {{
+                width: 49%; background: #fff; border: 1px solid #E6EAF2;
+                border-radius: 14px; padding: 12px 15px; margin-bottom: 12px;
+                page-break-inside: avoid;
+            }}
+            .gh {{ font-size: 14px; font-weight: 700; margin-bottom: 7px; padding-left: 10px;
+                  border-left: 5px solid #2563EB; line-height: 1.2; }}
+            .plotly-graph {{ width: 100%; height: 400px; }}
+            .coment-sec {{ margin-top: 6px; }}
+            .coment {{ background: #fff; border: 1px solid #E6EAF2; border-radius: 12px;
+                      padding: 12px 15px; margin-bottom: 9px; page-break-inside: avoid; }}
+            .coment-top {{ display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; }}
+            .coment-nom {{ font-family: 'Poppins', Arial, sans-serif; font-weight: 700; font-size: 13px; color: #1B2436; }}
+            .coment-meta {{ font-size: 10.5px; color: #6B7890; font-weight: 600; text-transform: uppercase; letter-spacing: .3px; }}
+            .coment-txt {{ font-size: 12px; color: #3A4560; line-height: 1.5; }}
+            .subhead {{ font-family: 'Poppins', Arial, sans-serif; font-weight: 700; font-size: 15px;
+                        color: #1B2436; display: flex; align-items: center; gap: 10px;
+                        margin-bottom: 14px; padding-bottom: 10px; border-bottom: 2px solid #E6EAF2; }}
+            .subhead-mark {{ width: 24px; height: 24px; border-radius: 7px;
+                            background: linear-gradient(135deg, #3B82F6, #60A5FA); display: inline-block; }}
+    </style>
+</head>
+<body>
+    """)
+
+    # Iconos KPI
+    iconos = [
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7h-9M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></svg>',
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.7 2.7-2-2 2.7-2.7Z"/></svg>',
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>',
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 7-7"/><path d="M17 5h4v4"/></svg>',
+    ]
+    acentos_bg = ["#E0EBFF", "#D7F5F2", "#FEE2E2", "#EDE4FF", "#FEF0CF"]
+    kpi_acentos = ["#2563EB", "#0EA5A5", "#EF4444", "#7C3AED", "#F59E0B"]
+
+    for bloque in bloques:
+        subtitulo = bloque.get("subtitulo", "")
+        kpis = bloque.get("kpis", {})
+        figuras = bloque.get("figuras", [])
+        progreso = bloque.get("progreso", 0)
+        horas_acum = bloque.get("horas_acum", 0)
+        horas_tot = bloque.get("horas_tot", 400)
+        comentarios = bloque.get("comentarios", [])
+
+        # KPIs
+        items = list(kpis.items())[:5]
+        filas_kpi = [items[:3], items[3:]]
+        kpi_html = ""
+        idx = 0
+        for fila in filas_kpi:
+            if not fila:
+                continue
+            kpi_html += '<div class="kpi-row">'
+            for k, v in fila:
+                kpi_html += f"""
+                  <div class="kpi">
+                    <div class="ico" style="background:{acentos_bg[idx%5]};color:{kpi_acentos[idx%5]}">{iconos[idx%5]}</div>
+                    <div class="val">{v}</div><div class="lbl">{k}</div>
+                  </div>"""
+                idx += 1
+            kpi_html += '</div>'
+
+        # Barra de progreso
+        barra_prog = f'<div class="prog"><div class="prog-bar" style="width:{max(0,min(progreso,100)):.1f}%"></div></div>' if progreso is not None else ""
+
+        # Hero
+        if horas_acum is not None and horas_tot:
+            pct_txt = f"{progreso:.0f}% completado" if progreso is not None else ""
+            cap = f"{subtitulo} · {pct_txt}" if pct_txt else subtitulo
+            hero_r = f'<div class="hero-r"><div class="big">{horas_acum} h <span>/ {horas_tot} h</span></div><div class="cap">{cap}</div></div>'
+        else:
+            hero_r = f'<div class="hero-r"><div class="cap">{subtitulo}</div></div>'
+
+        # Gráficos
+        primera = figuras[:4]
+        resto = figuras[4:]
+
+        def _grid(figs):
+            h = ""
+            colores = ["#0EA5A5", "#2563EB", "#7C3AED", "#16A34A", "#F59E0B", "#0891B2"]
+            for i, (tit, fig) in enumerate(figs):
+                color = colores[i % len(colores)]
+                # Convertir figura a HTML con Plotly.js
+                fig_html = pio.to_html(fig, full_html=False, include_plotlyjs=False,
+                                       config={'displayModeBar': False})
+                h += f"""
+                  <div class="gcard">
+                    <div class="gh" style="border-left-color:{color}">{tit}</div>
+                    <div class="plotly-graph">{fig_html}</div>
+                  </div>"""
+            return h
+
+        # Comentarios
+        coment_html = ""
+        if comentarios:
+            tarjetas = ""
+            for c in comentarios:
+                evaluador = c.get("evaluador", "Evaluador")
+                fecha = c.get("fecha", "")
+                semana = c.get("semana", "")
+                texto = c.get("comentario", "")
+                meta = f"Semana {semana}" + (f" · {fecha}" if fecha else "")
+                tarjetas += f"""
+                  <div class="coment">
+                    <div class="coment-top">
+                      <span class="coment-nom">{evaluador}</span>
+                      <span class="coment-meta">{meta}</span>
+                    </div>
+                    <div class="coment-txt">{texto}</div>
+                  </div>"""
+            coment_html = f"""
+              <div class="coment-sec">
+                <div class="subhead">
+                  <span class="subhead-mark"></span>
+                  Comentarios de los evaluadores
+                </div>
+                {tarjetas}
+              </div>"""
+
+        # Página principal
+        html_parts.append(f"""
+        <div class="page">
+          <div class="hero">
+            <div class="hero-l">
+              <div class="mark"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAARzQklUCAgICHwIZAAAAAlwSFlzAAAOxAAADsQBlSsOGwAAA7ZJREFUWEfdl3tIFFEcxr8zszPuuulavpJN00hQEbLoQSyBgiyEHoYRSGCEQmCBKPYHEWQUZJZBPRDDhAx6QUL0R4iYCYIhFBTUQvWA0h4S7Z+57fvbzszu7ux6Ec9++sEw5zvfOff3vWe+mR0C++c+8J/47fv9x9n+cZ1hgw3kQShCBCrwPF70B8CTaEYi6pj3V6cjwUGiq0Q7ibZ6AaCFqI3oIlFzPARo4PmyxP8qoCP2bN1KtFdNwA2u7UQXiT4QvSHa/g8BckBnA9FqogkiS6w0AzTXJSwAEX8gOkD0hagrpoXeAvj2R11nAD2yM9qI6kR9FPWXU/4fcFogagHwA4F2UCu2xGdoLUuuAHR4e6GIZyf1thI9aAyQpQN3ANVAfB2wBP6NEb0kKpW/lQBq1JoAWoFa7Yp5YddIswH0iPl6/3VE6/qcXQhBtMC+WtY8q/oG19YvquGtWtXmQFJNAEvCehM90ONkI4CjRJuI2ohOE80GAUA1B+Xrp4mqhM+JDRBJALrFnz2iP8zOoQ8IEVMGoBkkWt0t8u+Rc2qcrI4AfQoAvUJxltpDNBYrAz6xVkyA3F5u9cjm7Yq7eElbSJZ5rCwe8JgooA1Z2VuKhPe+E1mnbfT6sZISAgq3+rxPonR3hbyFpwAenD9ANEqUHg6AzS+rg0cr3qVYry3Z06++H6aDFwpPkJSQojhUlp5/kKwpwwBq8hV2TfyxrqK2LP6KdTO13z6CttIsulhYoz4MZ5MVCSDVQ/caUD9+WCH3/cv3ZPSlyJxx1phHrl3ZXPT4pMl7Azh4RSwB4pYAiDZLs7ALQGq40N1GVH8jCBhZQZSy1gB+vHtyi2jvLFEYAMtHmvg/lhSROlVMk12sAQBQXwKga51j1LNT7xoA4Q8hKQNgumAg0s7WMAHwnBEUoBYHOUgY4HvLFZZzD/IJkUoYf0u94gAePd1X3LptVjQD0Q3fK8VnE5HbTZ5Jk0Qz3kfI04PzssDheq5LCLh/WmgEAOn6TMR9m4nK54nS5GkTQWsTSUZGRsKbNm2aVlNTk9rQ0EB2u537J/aJI43PJ8kTVtTjcezMhKZMFgmxQQUhA4CZ1hPtGBoaaiJ6/149N67AIiMdoRwiLXpjPT8LCyt+vPWVpufhE0FOzsrK8qSlpdkdDgc3Njby0FAcF48vPTvrHj9szMt3lBXVRRzZzRG2YFnzrGeWJIZ6U3Z2dnJ5eXljTk6Oq6Ojg9Vz1hV41FYAIcE7IC4TYEGenYrEL2q0r2+oPm+BEE1MAAAAAElFTkSuQmCC" alt=""></div>
+              <div class="hero-txt">
+                <h1>BitaLogs - Panel de Rendimiento</h1>
+                <p>Luis Velásquez · Cuenta 21941285 · Ingeniería Biomédica</p>
+              </div>
+            </div>
+            {hero_r}
+          </div>
+          {barra_prog}
+          <div class="kpis">{kpi_html}</div>
+          <div class="grid">{_grid(primera)}</div>
+          {coment_html if not resto else ""}
+        </div>
+        """)
+
+        # Páginas de continuación
+        grupos = [resto[i:i+4] for i in range(0, len(resto), 4)]
+        for idx_g, grupo in enumerate(grupos):
+            es_ultimo = (idx_g == len(grupos) - 1)
+            html_parts.append(f"""
+        <div class="page">
+          <div class="subhead">
+            <span class="subhead-mark"></span>
+            BitaLogs · {subtitulo} · continuación
+          </div>
+          <div class="grid">{_grid(grupo)}</div>
+          {coment_html if es_ultimo else ""}
+        </div>
+        """)
+
+    html_parts.append("</body></html>")
+    return "\n".join(html_parts)
+
+# ---------- BOTONES ----------
+# Botón 1: Toda la práctica
 if st.button("📄 Reporte completo (Toda la práctica)", use_container_width=True):
     # Obtener datos
     df_full = _prep(load_atenciones())
@@ -1272,136 +1482,111 @@ if st.button("📄 Reporte completo (Toda la práctica)", use_container_width=Tr
     horas_tot = cal.horas_totales_practica()
     horas_acum = cal.horas_hasta(hoy_hn())
     
-    # Construir KPIs y figuras
     kpis, figuras = construir_bloque_indicadores(
         df_full, df_act_full, "Toda la práctica", horas_acum, horas_tot
     )
     
-    # Generar HTML
-    from reporte_pdf import _bloque_html, _html_completo, _prep_figuras
-    figs_prep = _prep_figuras(figuras)
-    html_completo = _html_completo(_bloque_html(
-        "Toda la práctica", kpis, figs_prep,
-        horas_acum / horas_tot * 100 if horas_tot else 0,
-        horas_acum, horas_tot, coment_full
-    ))
+    bloques = [{
+        "subtitulo": "Toda la práctica",
+        "kpis": kpis,
+        "figuras": figuras,
+        "progreso": horas_acum / horas_tot * 100 if horas_tot else 0,
+        "horas_acum": horas_acum,
+        "horas_tot": horas_tot,
+        "comentarios": coment_full
+    }]
     
-    # Abrir en nueva pestaña
-    b64_html = base64.b64encode(html_completo.encode()).decode()
-    js = f"""
-    <script>
-    window.open('data:text/html;base64,{b64_html}', '_blank');
-    </script>
-    """
+    html = generar_reporte_html_con_plotly("BitaLogs - Reporte", bloques)
+    
+    import base64
+    b64 = base64.b64encode(html.encode()).decode()
+    js = f'<script>window.open("data:text/html;base64,{b64}","_blank");</script>'
     st.components.v1.html(js, height=0)
-    st.success("✅ Reporte abierto en nueva pestaña. Presioná Ctrl+P para guardar como PDF.")
+    st.success("✅ Reporte abierto en nueva pestaña. Ctrl+P para guardar como PDF.")
 
-# ========== BOTÓN 2: Semana específica ==========
+# Botón 2: Semana específica
 st.markdown("---")
 st.caption("O seleccioná una semana específica:")
-
-col_semana, col_boton = st.columns([2, 1])
-with col_semana:
-    semana_seleccionada = st.selectbox(
+col_sem, col_btn = st.columns([2, 1])
+with col_sem:
+    semana_sel = st.selectbox(
         "Semana",
         [f"Semana {s}" for s in cal.lista_semanas()],
         key="select_semana_reporte_final"
     )
-with col_boton:
+with col_btn:
     if st.button("📄 Ver semana", use_container_width=True):
-        semana = int(semana_seleccionada.split()[1])
+        semana = int(semana_sel.split()[1])
         etiqueta = f"Semana {semana}"
         
-        # Obtener datos filtrados
-        df_full = _prep(load_atenciones())
-        df_semana = df_full[df_full["semana"] == semana]
-        df_act_full = load_actividades_extra()
-        df_act_full["_fecha"] = pd.to_datetime(df_act_full.get("fecha"), errors="coerce")
-        df_act_semana = df_act_full[df_act_full["semana"] == semana]
-        horas_acum_semana = cal.horas_hasta(cal.viernes_de_semana(semana))
-        horas_tot = cal.horas_totales_practica()
-        coment_full = load_comentarios()
-        coment_semana = coment_full[coment_full["semana"] == semana].sort_values("fecha_registro").to_dict("records")
+        df_sem = _prep(load_atenciones())
+        df_sem = df_sem[df_sem["semana"] == semana]
+        df_act_sem = load_actividades_extra()
+        df_act_sem["_fecha"] = pd.to_datetime(df_act_sem.get("fecha"), errors="coerce")
+        df_act_sem = df_act_sem[df_act_sem["semana"] == semana]
+        horas_acum_sem = cal.horas_hasta(cal.viernes_de_semana(semana))
+        coment_sem = load_comentarios()
+        coment_sem = coment_sem[coment_sem["semana"] == semana].sort_values("fecha_registro").to_dict("records")
         
-        # Construir KPIs y figuras
-        kpis_semana, figuras_semana = construir_bloque_indicadores(
-            df_semana, df_act_semana, etiqueta, horas_acum_semana, horas_tot
+        kpis_s, figuras_s = construir_bloque_indicadores(
+            df_sem, df_act_sem, etiqueta, horas_acum_sem, horas_tot
         )
         
-        # Generar HTML
-        from reporte_pdf import _bloque_html, _html_completo, _prep_figuras
-        figs_prep_semana = _prep_figuras(figuras_semana)
-        html_semana = _html_completo(_bloque_html(
-            etiqueta, kpis_semana, figs_prep_semana,
-            horas_acum_semana / horas_tot * 100 if horas_tot else 0,
-            horas_acum_semana, horas_tot, coment_semana
-        ))
+        bloques_s = [{
+            "subtitulo": etiqueta,
+            "kpis": kpis_s,
+            "figuras": figuras_s,
+            "progreso": horas_acum_sem / horas_tot * 100 if horas_tot else 0,
+            "horas_acum": horas_acum_sem,
+            "horas_tot": horas_tot,
+            "comentarios": coment_sem
+        }]
         
-        # Abrir en nueva pestaña
-        b64_html_semana = base64.b64encode(html_semana.encode()).decode()
-        js_semana = f"""
-        <script>
-        window.open('data:text/html;base64,{b64_html_semana}', '_blank');
-        </script>
-        """
-        st.components.v1.html(js_semana, height=0)
+        html = generar_reporte_html_con_plotly("BitaLogs - Reporte", bloques_s)
+        import base64
+        b64 = base64.b64encode(html.encode()).decode()
+        js = f'<script>window.open("data:text/html;base64,{b64}","_blank");</script>'
+        st.components.v1.html(js, height=0)
         st.success(f"✅ Reporte de {etiqueta} abierto en nueva pestaña.")
 
-# ========== BOTÓN 3: Todas las semanas ==========
+# Botón 3: Todas las semanas
 st.markdown("---")
 if st.button("📚 Reporte de todas las semanas (1-10)", use_container_width=True):
-    df_full_reporte = _prep(load_atenciones())
-    df_act_full_reporte = load_actividades_extra()
-    df_act_full_reporte["_fecha"] = pd.to_datetime(df_act_full_reporte.get("fecha"), errors="coerce")
-    coment_full_reporte = load_comentarios()
-    horas_tot_reporte = cal.horas_totales_practica()
+    df_full = _prep(load_atenciones())
+    df_act_full = load_actividades_extra()
+    df_act_full["_fecha"] = pd.to_datetime(df_act_full.get("fecha"), errors="coerce")
+    coment_full = load_comentarios()
+    horas_tot = cal.horas_totales_practica()
     
-    bloques = []
+    bloques_multi = []
     for s in cal.lista_semanas():
-        sub = df_full_reporte[df_full_reporte["semana"] == s] if not df_full_reporte.empty else df_full_reporte
-        sub_act = (df_act_full_reporte[df_act_full_reporte["semana"] == s]
-                   if not df_act_full_reporte.empty else df_act_full_reporte)
+        sub = df_full[df_full["semana"] == s] if not df_full.empty else df_full
+        sub_act = (df_act_full[df_act_full["semana"] == s] if not df_act_full.empty else df_act_full)
         if sub.empty and sub_act.empty:
             continue
         h_acum = cal.horas_hasta(cal.viernes_de_semana(s))
-        kpis_s, figs_s = construir_bloque_indicadores(
-            sub, sub_act, f"Semana {s}", h_acum, horas_tot_reporte)
-        com_s = (coment_full_reporte[coment_full_reporte["semana"] == s]
-                 if not coment_full_reporte.empty else coment_full_reporte)
-        com_s = com_s.rename(columns={
-            "fecha_registro": "fecha"}).to_dict("records") if not com_s.empty else []
-        bloques.append({
+        kpis_s, figs_s = construir_bloque_indicadores(sub, sub_act, f"Semana {s}", h_acum, horas_tot)
+        com_s = (coment_full[coment_full["semana"] == s] if not coment_full.empty else coment_full)
+        com_s = com_s.rename(columns={"fecha_registro": "fecha"}).to_dict("records") if not com_s.empty else []
+        bloques_multi.append({
             "subtitulo": f"Semana {s}",
-            "kpis": kpis_s, "figuras": figs_s,
-            "progreso": h_acum / horas_tot_reporte * 100 if horas_tot_reporte else 0,
-            "horas_acum": h_acum, "horas_tot": horas_tot_reporte,
+            "kpis": kpis_s,
+            "figuras": figs_s,
+            "progreso": h_acum / horas_tot * 100 if horas_tot else 0,
+            "horas_acum": h_acum,
+            "horas_tot": horas_tot,
             "comentarios": com_s
         })
     
-    if bloques:
-        from reporte_pdf import _bloque_html, _html_completo, _prep_figuras
-        cuerpo = ""
-        for b in bloques:
-            figs = _prep_figuras(b.get("figuras", []))
-            cuerpo += _bloque_html(
-                b.get("subtitulo", ""), b.get("kpis", {}),
-                figs, b.get("progreso"),
-                b.get("horas_acum"), b.get("horas_tot"),
-                b.get("comentarios")
-            )
-        html_multi = _html_completo(cuerpo)
-        
-        b64_html_multi = base64.b64encode(html_multi.encode()).decode()
-        js_multi = f"""
-        <script>
-        window.open('data:text/html;base64,{b64_html_multi}', '_blank');
-        </script>
-        """
-        st.components.v1.html(js_multi, height=0)
+    if bloques_multi:
+        html = generar_reporte_html_con_plotly("BitaLogs - Reporte Semanal", bloques_multi)
+        import base64
+        b64 = base64.b64encode(html.encode()).decode()
+        js = f'<script>window.open("data:text/html;base64,{b64}","_blank");</script>'
+        st.components.v1.html(js, height=0)
         st.success("✅ Reporte de todas las semanas abierto en nueva pestaña.")
     else:
-        st.warning("No hay datos registrados en ninguna semana.")
-
+        st.warning("No hay datos en ninguna semana.")
         # ---- Exportar ----
         st.divider()
         st.subheader("⬇️ Exportar a Excel (lo filtrado)")
