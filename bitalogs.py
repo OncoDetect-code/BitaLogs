@@ -1276,10 +1276,10 @@ with tab_dash:
                               color="Tipo de actividad",
                               color_discrete_sequence=ui.PALETA)
             # Grosor de barra FIJO: así se ven iguales de gruesas tenga 3 o
-            # 15 actividades (antes la altura se dividía entre las barras, y
-            # con muchas quedaban finas). Cada barra ocupa 26 px de los 60
-            # de su "carril", el resto es aire para el título de arriba.
-            _grosor, _carril = 26, 60
+            # 15 actividades. Cada barra ocupa 24 px de los 72 de su
+            # "carril"; el resto es aire para que el título de arriba no se
+            # encime con la barra.
+            _grosor, _carril = 24, 72
             fig_dist.update_traces(
                 texttemplate="%{text:.1f} h", textposition="outside",
                 cliponaxis=False, width=_grosor / _carril)
@@ -1288,7 +1288,7 @@ with tab_dash:
                     x=0, y=fila_d["Tipo de actividad"],
                     text=f"<b>{fila_d['Tipo de actividad']}</b>",
                     showarrow=False, xanchor="left", yanchor="bottom",
-                    yshift=16, xshift=-2,
+                    yshift=18, xshift=-2,
                     font=dict(size=13, color="#1B2436"))
             altura_dist = _carril * len(dist) + 40
             ui.estilizar_figura(fig_dist, altura=altura_dist, leyenda=False)
