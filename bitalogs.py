@@ -1282,7 +1282,7 @@ with tab_dash:
                     x=0, y=fila_d["Tipo de actividad"],
                     text=f"<b>{fila_d['Tipo de actividad']}</b>",
                     showarrow=False, xanchor="left", yanchor="bottom",
-                    yshift=22, xshift=-2,
+                    yshift=18, xshift=-2,
                     font=dict(size=13, color="#1B2436"))
                 # Horas al final de la barra
                 fig_dist.add_annotation(
@@ -1290,14 +1290,14 @@ with tab_dash:
                     text=f"<b>{fila_d['Horas']:.1f} h</b>",
                     showarrow=False, xanchor="left", yanchor="middle",
                     xshift=8, font=dict(size=12, color="#1B2436"))
-            altura_dist = max(340, 68 * len(dist) + 40)
+            altura_dist = max(340, 46 * len(dist) + 40)
             ui.estilizar_figura(fig_dist, altura=altura_dist, leyenda=False)
             fig_dist.update_layout(
                 yaxis=dict(showticklabels=False, title=""),
                 xaxis=dict(title="Horas",
                            range=[0, max(dist["Horas"]) * 1.15]),
                 margin=dict(l=8, r=60, t=14, b=40),
-                bargap=0.6,
+                bargap=0.4,
                 uniformtext=dict(mode="hide", minsize=10))
             st.plotly_chart(fig_dist, use_container_width=True)
 
