@@ -1297,7 +1297,7 @@ with tab_dash:
                 xaxis=dict(title="Horas"),
                 margin=dict(l=8, r=45, t=14, b=40),
                 uniformtext=dict(mode="hide", minsize=10))
-            st.plotly_chart(fig_dist, use_container_width=True)
+            st.plotly_chart(fig_dist, use_container_width=True, theme=None)
 
         # ---- Gráficos de rendimiento ----
         g1, g2 = st.columns(2)
@@ -1314,7 +1314,7 @@ with tab_dash:
                              color_discrete_sequence=[ui.PALETA[0]])
                 fig.update_layout(xaxis_tickangle=-40)
                 ui.estilizar_figura(fig, altura=290, leyenda=False)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, theme=None)
         with g2:
             por_tipo = (fdf.groupby("tipo").size()
                         .rename_axis("Tipo").reset_index(name="Cantidad"))
@@ -1328,7 +1328,7 @@ with tab_dash:
                               hole=0.55, color_discrete_sequence=ui.PALETA)
                 fig2.update_traces(textposition="inside", textinfo="percent")
                 ui.estilizar_figura(fig2, altura=290, leyenda=True)
-                st.plotly_chart(fig2, use_container_width=True)
+                st.plotly_chart(fig2, use_container_width=True, theme=None)
             else:
                 st.info("Sin datos de mantenimiento para este filtro.")
 
@@ -1346,7 +1346,7 @@ with tab_dash:
                                               "No": ui.PALETA[4]})
             fig3.update_traces(textposition="inside", textinfo="percent")
             ui.estilizar_figura(fig3, altura=290, leyenda=True)
-            st.plotly_chart(fig3, use_container_width=True)
+            st.plotly_chart(fig3, use_container_width=True, theme=None)
         with g4:
             dd = fdf.dropna(subset=["duracion_min"])
             ui.encabezado_seccion("Duración de las atenciones", ui.PALETA[6])
@@ -1372,7 +1372,7 @@ with tab_dash:
                                    yaxis_title="Atenciones",
                                    yaxis_range=[0, (_max4 * 1.18) if _max4 else 1])
                 ui.estilizar_figura(fig4, altura=290, leyenda=False)
-                st.plotly_chart(fig4, use_container_width=True)
+                st.plotly_chart(fig4, use_container_width=True, theme=None)
             else:
                 st.info("Sin datos de duración para graficar.")
 
@@ -1390,7 +1390,7 @@ with tab_dash:
             fig5.update_layout(
                 yaxis_range=[0, (_max5 * 1.18) if _max5 else 1])
             ui.estilizar_figura(fig5, altura=280, leyenda=False)
-            st.plotly_chart(fig5, use_container_width=True)
+            st.plotly_chart(fig5, use_container_width=True, theme=None)
 
             # ---- Tendencia de horas acumuladas: real vs meta ----
             # Responde a la sugerencia de proyectar el cumplimiento de las
@@ -1424,7 +1424,7 @@ with tab_dash:
                 connectgaps=False))
             fig_t.update_layout(yaxis_title="Horas")
             ui.estilizar_figura(fig_t, altura=300, leyenda=True)
-            st.plotly_chart(fig_t, use_container_width=True)
+            st.plotly_chart(fig_t, use_container_width=True, theme=None)
 
             # ---- Evolución del tipo de mantenimiento por semana ----
             # Barras apiladas: muestra si se está pasando de correctivo
@@ -1444,7 +1444,7 @@ with tab_dash:
                 fig_ev.update_layout(barmode="stack", yaxis_title="Equipos",
                                      xaxis_title="")
                 ui.estilizar_figura(fig_ev, altura=300, leyenda=True)
-                st.plotly_chart(fig_ev, use_container_width=True)
+                st.plotly_chart(fig_ev, use_container_width=True, theme=None)
 
         # ---- Reporte PDF (dashboard, imprimible) ----
         st.divider()
