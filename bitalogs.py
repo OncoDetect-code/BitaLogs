@@ -1275,9 +1275,14 @@ with tab_dash:
                               orientation="h", text="Horas",
                               color="Tipo de actividad",
                               color_discrete_sequence=ui.PALETA)
+            # Grosor de barra FIJO: así se ven iguales de gruesas tenga 3 o
+            # 15 actividades (antes la altura se dividía entre las barras, y
+            # con muchas quedaban finas). Cada barra ocupa 26 px de los 60
+            # de su "carril", el resto es aire para el título de arriba.
+            _grosor, _carril = 26, 60
             fig_dist.update_traces(
                 texttemplate="%{text:.1f} h", textposition="outside",
-                cliponaxis=False)
+                cliponaxis=False, width=_grosor / _carril)
             for _, fila_d in dist.iterrows():
                 fig_dist.add_annotation(
                     x=0, y=fila_d["Tipo de actividad"],
@@ -1285,13 +1290,12 @@ with tab_dash:
                     showarrow=False, xanchor="left", yanchor="bottom",
                     yshift=16, xshift=-2,
                     font=dict(size=13, color="#1B2436"))
-            altura_dist = max(360, 62 * len(dist) + 60)
+            altura_dist = _carril * len(dist) + 40
             ui.estilizar_figura(fig_dist, altura=altura_dist, leyenda=False)
             fig_dist.update_layout(
                 yaxis=dict(showticklabels=False, title=""),
                 xaxis=dict(title="Horas"),
                 margin=dict(l=8, r=45, t=14, b=40),
-                bargap=0.55,
                 uniformtext=dict(mode="hide", minsize=10))
             st.plotly_chart(fig_dist, use_container_width=True)
 
