@@ -1437,10 +1437,21 @@ with tab_dash:
                 evol = evol.sort_values("semana")
                 ui.encabezado_seccion(
                     "Evolución del tipo de mantenimiento", ui.PALETA[2])
-                fig_ev = px.bar(
-                    evol, x="Semana", y="Cantidad", color="tipo",
-                    color_discrete_sequence=ui.PALETA,
-                    labels={"tipo": "Tipo", "Cantidad": "Equipos"})
+                # Se construye con go.Figure (una traza por tipo) y
+                # barmode=stack explícito. Así el apilado no depende de lo
+                # que Plotly Express decida por defecto: cada tipo es una
+                # capa que se suma sobre la anterior, sin ambigüedad.
+                _sem_orden = [f"Sem {n}" for n in cal.lista_semanas()]
+                _tipos = [t for t in TIPOS
+                          if t in evol["tipo"].unique()]
+                fig_ev = go.Figure()
+                for _i, _t in enumerate(_tipos):
+                    _d = evol[evol["tipo"] == _t]
+                    _mapa = dict(zip(_d["Semana"], _d["Cantidad"]))
+                    fig_ev.add_trace(go.Bar(
+                        name=_t, x=_sem_orden,
+                        y=[_mapa.get(s, 0) for s in _sem_orden],
+                        marker_color=ui.PALETA[_i % len(ui.PALETA)]))
                 fig_ev.update_layout(barmode="stack", yaxis_title="Equipos",
                                      xaxis_title="")
                 ui.estilizar_figura(fig_ev, altura=300, leyenda=True)
