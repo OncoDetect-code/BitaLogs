@@ -1272,32 +1272,26 @@ with tab_dash:
             fig_dist = None
         else:
             fig_dist = px.bar(dist, x="Horas", y="Tipo de actividad",
-                              orientation="h",
+                              orientation="h", text="Horas",
                               color="Tipo de actividad",
                               color_discrete_sequence=ui.PALETA)
-            fig_dist.update_traces(cliponaxis=False)
+            fig_dist.update_traces(
+                texttemplate="%{text:.1f} h", textposition="outside",
+                cliponaxis=False)
             for _, fila_d in dist.iterrows():
-                # Título de la actividad encima de la barra
                 fig_dist.add_annotation(
                     x=0, y=fila_d["Tipo de actividad"],
                     text=f"<b>{fila_d['Tipo de actividad']}</b>",
                     showarrow=False, xanchor="left", yanchor="bottom",
-                    yshift=18, xshift=-2,
+                    yshift=16, xshift=-2,
                     font=dict(size=13, color="#1B2436"))
-                # Horas al final de la barra
-                fig_dist.add_annotation(
-                    x=fila_d["Horas"], y=fila_d["Tipo de actividad"],
-                    text=f"<b>{fila_d['Horas']:.1f} h</b>",
-                    showarrow=False, xanchor="left", yanchor="middle",
-                    xshift=8, font=dict(size=12, color="#1B2436"))
-            altura_dist = max(340, 46 * len(dist) + 40)
+            altura_dist = max(360, 62 * len(dist) + 60)
             ui.estilizar_figura(fig_dist, altura=altura_dist, leyenda=False)
             fig_dist.update_layout(
                 yaxis=dict(showticklabels=False, title=""),
-                xaxis=dict(title="Horas",
-                           range=[0, max(dist["Horas"]) * 1.15]),
-                margin=dict(l=8, r=60, t=14, b=40),
-                bargap=0.4,
+                xaxis=dict(title="Horas"),
+                margin=dict(l=8, r=45, t=14, b=40),
+                bargap=0.55,
                 uniformtext=dict(mode="hide", minsize=10))
             st.plotly_chart(fig_dist, use_container_width=True)
 
@@ -1442,13 +1436,10 @@ with tab_dash:
                 fig_ev = px.bar(
                     evol, x="Semana", y="Cantidad", color="tipo",
                     color_discrete_sequence=ui.PALETA,
-                    barmode="stack",
                     labels={"tipo": "Tipo", "Cantidad": "Equipos"})
-                ui.estilizar_figura(fig_ev, altura=300, leyenda=True)
-                # Se re-fuerza el apilado DESPUÉS de estilizar, porque el
-                # template de estilizar_figura resetea el barmode a agrupado.
                 fig_ev.update_layout(barmode="stack", yaxis_title="Equipos",
                                      xaxis_title="")
+                ui.estilizar_figura(fig_ev, altura=300, leyenda=True)
                 st.plotly_chart(fig_ev, use_container_width=True)
 
         # ---- Reporte PDF (dashboard, imprimible) ----
