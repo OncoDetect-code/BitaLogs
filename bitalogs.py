@@ -1278,7 +1278,7 @@ with tab_dash:
             # Grosor de barra FIJO dentro de un "carril" amplio: la barra
             # ocupa 22 px de los 80 del carril, dejando bastante aire arriba
             # para que el título quede por encima sin encimarse con la barra.
-            _grosor, _carril = 20, 72
+            _grosor, _carril = 22, 58
             fig_dist.update_traces(
                 texttemplate="%{text:.1f} h", textposition="outside",
                 cliponaxis=False, width=_grosor / _carril)
