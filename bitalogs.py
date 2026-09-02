@@ -1278,7 +1278,7 @@ with tab_dash:
             # Grosor de barra FIJO dentro de un "carril" amplio: la barra
             # ocupa 22 px de los 80 del carril, dejando bastante aire arriba
             # para que el título quede por encima sin encimarse con la barra.
-            _grosor, _carril = 20, 95
+            _grosor, _carril = 20, 72
             fig_dist.update_traces(
                 texttemplate="%{text:.1f} h", textposition="outside",
                 cliponaxis=False, width=_grosor / _carril)
@@ -1287,7 +1287,7 @@ with tab_dash:
                     x=0, y=fila_d["Tipo de actividad"],
                     text=f"<b>{fila_d['Tipo de actividad']}</b>",
                     showarrow=False, xanchor="left", yanchor="bottom",
-                    yshift=36, xshift=-2,
+                    yshift=16, xshift=-2,
                     font=dict(size=13, color="#1B2436"))
             altura_dist = _carril * len(dist) + 40
             ui.estilizar_figura(fig_dist, altura=altura_dist, leyenda=False)
