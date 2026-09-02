@@ -1271,31 +1271,40 @@ with tab_dash:
                     "otras actividades) para este filtro.")
             fig_dist = None
         else:
-            fig_dist = px.bar(dist, x="Horas", y="Tipo de actividad",
-                              orientation="h", text="Horas",
-                              color="Tipo de actividad",
-                              color_discrete_sequence=ui.PALETA)
-            # Grosor de barra FIJO dentro de un "carril" amplio: la barra
-            # ocupa 22 px de los 80 del carril, dejando bastante aire arriba
-            # para que el título quede por encima sin encimarse con la barra.
-            _grosor, _carril = 22, 58
-            fig_dist.update_traces(
-                texttemplate="%{text:.1f} h", textposition="outside",
-                cliponaxis=False, width=_grosor / _carril)
-            for _, fila_d in dist.iterrows():
+            # Se construye con go.Figure y el título de cada barra se
+            # posiciona con COORDENADAS DE DATOS (no píxeles): 0.42 unidades
+            # arriba del centro de su barra. Así todos los títulos quedan
+            # exactamente a la misma distancia de su barra (equidistante),
+            # sin encimarse ni quedar lejos, tenga la cantidad de
+            # actividades que tenga.
+            # go.Bar apila de abajo hacia arriba, así que se invierte el
+            # orden para que la actividad de MÁS horas quede abajo (como en
+            # el diseño original).
+            _nombres = list(dist["Tipo de actividad"])[::-1]
+            _horas = list(dist["Horas"])[::-1]
+            _n = len(_nombres)
+            fig_dist = go.Figure()
+            for _i in range(_n):
+                fig_dist.add_trace(go.Bar(
+                    x=[_horas[_i]], y=[_i], orientation="h",
+                    marker_color=ui.PALETA[_i % len(ui.PALETA)],
+                    width=0.45, showlegend=False,
+                    text=[f"{_horas[_i]:.1f} h"], textposition="outside",
+                    textfont=dict(size=12, color="#1B2436"),
+                    cliponaxis=False))
                 fig_dist.add_annotation(
-                    x=0, y=fila_d["Tipo de actividad"],
-                    text=f"<b>{fila_d['Tipo de actividad']}</b>",
-                    showarrow=False, xanchor="left", yanchor="bottom",
-                    yshift=16, xshift=-2,
+                    x=0, y=_i + 0.42,
+                    text=f"<b>{_nombres[_i]}</b>", showarrow=False,
+                    xanchor="left", yanchor="middle", xshift=-2,
                     font=dict(size=13, color="#1B2436"))
-            altura_dist = _carril * len(dist) + 40
+            altura_dist = 52 * _n + 40
             ui.estilizar_figura(fig_dist, altura=altura_dist, leyenda=False)
             fig_dist.update_layout(
-                yaxis=dict(showticklabels=False, title=""),
-                xaxis=dict(title="Horas"),
-                margin=dict(l=8, r=45, t=14, b=40),
-                uniformtext=dict(mode="hide", minsize=10))
+                yaxis=dict(showticklabels=False, title="",
+                           range=[-0.6, _n - 0.4]),
+                xaxis=dict(title="Horas",
+                           range=[0, max(_horas) * 1.12]),
+                margin=dict(l=8, r=55, t=20, b=40), bargap=0)
             st.plotly_chart(fig_dist, use_container_width=True, theme=None)
 
         # ---- Gráficos de rendimiento ----
