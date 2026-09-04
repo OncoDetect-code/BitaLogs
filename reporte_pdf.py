@@ -220,7 +220,14 @@ def _bloque_html(subtitulo, kpis, figuras, progreso=None,
 
 
 _CSS = """
-  @page { size: A4 portrait; margin: 8mm; }
+  @page {
+    size: A4 portrait; margin: 8mm 8mm 12mm 8mm;
+    @bottom-center {
+      content: "BitaLogs · Reporte de Indicadores · by Luis Velásquez";
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 8px; color: #9AA5B1; letter-spacing: .3px;
+    }
+  }
   *{box-sizing:border-box;margin:0;padding:0;font-family:Arial,Helvetica,sans-serif}
   body{color:#1B2436;background:#fff}
   .page{page-break-after:always}

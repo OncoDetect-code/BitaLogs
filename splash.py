@@ -54,6 +54,12 @@ def _html(dur: float) -> str:
       margin-top:4px; font-size:14px; color:#8A9AA5; opacity:0;
       animation: blIn .6s ease forwards; animation-delay:3.2s;
     }}
+    #bl-splash-overlay .cred {{
+      position:absolute; bottom:26px; left:0; right:0; text-align:center;
+      font-size:12.5px; color:#B4BEC6; letter-spacing:.5px; opacity:0;
+      animation: blIn .6s ease forwards; animation-delay:3.4s;
+    }}
+    #bl-splash-overlay .cred b {{ color:#8A9AA5; font-weight:600; }}
     @keyframes blIn  {{ from{{opacity:0}} to{{opacity:1}} }}
     @keyframes blOut {{ to{{opacity:0; visibility:hidden}} }}
   `;
@@ -104,6 +110,7 @@ def _html(dur: float) -> str:
     </svg>
     <div class="t">BitaLogs</div>
     <div class="s">Cargando tu rendimiento...</div>
+    <div class="cred">by <b>Luis Velásquez</b></div>
   `;
   doc.body.appendChild(ov);
 
